@@ -1,21 +1,36 @@
-//! Bevy systems that render the [`Klondike`] game and translate pointer input into moves.
+//! Bevy systems that render the [`Klondike`] game as 3D cards on the table and translate pointer
+//! input into moves.
+use std::f32::consts::{FRAC_PI_2, PI};
+
 use bevy::{platform::collections::HashMap, prelude::*, window::PrimaryWindow};
 
 use crate::{
     cards::{CARD_H, CARD_W, Card, new_deck, shuffle_deck},
     game::{Klondike, Pile},
     layout::{FACE_UP_OFFSET, card_position, drop_target, hit_test, pile_origin},
+    scene::{TableCamera, pointer_on_plane, to_table, to_world},
     state::GameState,
 };
 
 /// How quickly cards glide toward their resting place (higher is faster).
-const GLIDE_SPEED: f32 = 18.0;
+const GLIDE_SPEED: f32 = 14.0;
+/// How quickly cards turn over (higher is faster).
+const FLIP_SPEED: f32 = 12.0;
 /// Two presses on the same card within this many seconds count as a double-click.
 const DOUBLE_CLICK_SECS: f64 = 0.4;
-/// Z offset for cards that are travelling, so they pass over resting cards.
-const Z_MOVING: f32 = 100.0;
-/// Z offset for cards being dragged.
-const Z_DRAGGING: f32 = 200.0;
+/// Height of the bottom card of a pile above the felt.
+const REST_HEIGHT: f32 = 0.5;
+/// Height between cards stacked in a pile.
+///
+/// Generous enough that stacked cards never compete for the same depth (z-fighting), even with
+/// the lower depth precision of some mobile GPUs.
+const CARD_GAP: f32 = 0.5;
+/// How far travelling cards rise, so they pass over resting cards.
+const TRAVEL_LIFT: f32 = 25.0;
+/// Height of cards being dragged.
+const DRAG_HEIGHT: f32 = 40.0;
+/// Gap between a card's face and back quads.
+const FACE_SEPARATION: f32 = 0.05;
 /// Presses this close (in logical pixels) to the top of the window belong to the HUD.
 const HUD_HEIGHT_PX: f32 = 40.0;
 
@@ -23,37 +38,39 @@ const HUD_HEIGHT_PX: f32 = 40.0;
 #[derive(Resource, Default)]
 pub struct Table(pub Klondike);
 
-/// Handles to every card image.
+/// Mesh and materials shared by the cards and pile outlines.
 #[derive(Resource)]
-struct CardImages {
-    back: Handle<Image>,
-    faces: HashMap<Card, Handle<Image>>,
+struct CardAssets {
+    mesh: Handle<Mesh>,
+    back: Handle<StandardMaterial>,
+    faces: HashMap<Card, Handle<StandardMaterial>>,
+    slot: Handle<StandardMaterial>,
 }
 
 /// Maps each card to the entity that renders it.
 #[derive(Resource, Default)]
 struct CardEntities(HashMap<Card, Entity>);
 
-/// Marks the sprite entity of a card.
+/// A card on the table, and where it is heading.
 #[derive(Component)]
-struct CardSprite(Card);
-
-/// Where a card should come to rest.
-#[derive(Component)]
-struct Target(Vec3);
-
-/// The z a card had when its draw order was last refreshed. See [`refresh_draw_order`].
-#[derive(Component)]
-struct QueuedZ(f32);
+struct CardView {
+    card: Card,
+    /// Where the card should come to rest.
+    target: Vec3,
+    /// Whether the card should end up face up.
+    face_up: bool,
+    /// The card's current height before any lift from turning over.
+    height: f32,
+}
 
 /// Cards currently picked up by the pointer.
 struct Drag {
     from: Pile,
     index: usize,
     cards: Vec<Card>,
-    /// Offset from the pointer to the center of the first dragged card.
+    /// Offset (on the table) from the pointer to the center of the first dragged card.
     grab_offset: Vec2,
-    /// Last known pointer position (world space).
+    /// Last known pointer position, on the drag plane, in table coordinates.
     pointer: Vec2,
 }
 
@@ -80,7 +97,7 @@ impl Plugin for TablePlugin {
         app.init_resource::<Table>()
             .init_resource::<CardEntities>()
             .init_resource::<PointerState>()
-            .add_systems(Startup, (load_images, spawn_slots))
+            .add_systems(Startup, (load_card_assets, spawn_slots).chain())
             .add_systems(OnEnter(GameState::Deal), deal)
             .add_systems(
                 Update,
@@ -90,43 +107,76 @@ impl Plugin for TablePlugin {
             )
             .add_systems(
                 Update,
-                (sync_cards, animate_cards, update_moves_text).chain(),
-            )
-            .add_systems(
-                Update,
-                refresh_draw_order.after(animate_cards).after(pointer_input),
+                (sync_cards, animate_cards, update_moves_text)
+                    .chain()
+                    .after(pointer_input),
             );
     }
 }
 
-fn load_images(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.insert_resource(CardImages {
-        back: asset_server.load(Card::back_resource_name()),
-        faces: new_deck()
-            .into_iter()
-            .map(|card| (card, asset_server.load(card.face_resource_name())))
-            .collect(),
+/// Rotation of a card lying flat on the table, face up or face down.
+///
+/// A card's meshes lie in their local XY plane with the face toward +Z. Face up, that +Z points up
+/// (+Y) and the card's top points away from the player (-Z). Face down, the card is additionally
+/// turned over about its long side.
+fn card_rotation(face_up: bool) -> Quat {
+    let face_up_rotation = Quat::from_rotation_x(-FRAC_PI_2);
+    if face_up {
+        face_up_rotation
+    } else {
+        Quat::from_rotation_z(PI) * face_up_rotation
+    }
+}
+
+fn load_card_assets(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let mut card_material = |path: String| {
+        materials.add(StandardMaterial {
+            base_color_texture: Some(asset_server.load(path)),
+            alpha_mode: AlphaMode::Mask(0.5),
+            perceptual_roughness: 0.7,
+            ..default()
+        })
+    };
+    let back = card_material(Card::back_resource_name().to_string());
+    let faces = new_deck()
+        .into_iter()
+        .map(|card| (card, card_material(card.face_resource_name())))
+        .collect();
+    commands.insert_resource(CardAssets {
+        mesh: meshes.add(Rectangle::new(CARD_W, CARD_H)),
+        back,
+        faces,
+        slot: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.24, 0.52, 0.34),
+            perceptual_roughness: 1.0,
+            ..default()
+        }),
     });
 }
 
 /// Spawns faint outlines marking where each pile goes.
-fn spawn_slots(mut commands: Commands) {
+fn spawn_slots(mut commands: Commands, assets: Res<CardAssets>) {
     for pile in Klondike::all_piles() {
         commands.spawn((
-            Sprite::from_color(
-                Color::WHITE.with_alpha(0.15),
-                Vec2::new(CARD_W, CARD_H) - 4.0,
-            ),
-            Transform::from_translation(pile_origin(pile).extend(0.0)),
+            Mesh3d(assets.mesh.clone()),
+            MeshMaterial3d(assets.slot.clone()),
+            Transform::from_translation(to_world(pile_origin(pile), 0.1))
+                .with_rotation(card_rotation(true))
+                .with_scale(Vec3::new(0.95, 0.96, 1.0)),
         ));
     }
 }
 
-/// Starts a new game: shuffles, deals, and spawns a sprite for every card.
+/// Starts a new game: shuffles, deals, and spawns every card.
 fn deal(
     mut commands: Commands,
-    old_cards: Query<Entity, With<CardSprite>>,
-    images: Res<CardImages>,
+    old_cards: Query<Entity, With<CardView>>,
+    assets: Res<CardAssets>,
     mut table: ResMut<Table>,
     mut entities: ResMut<CardEntities>,
     mut pointer: ResMut<PointerState>,
@@ -137,22 +187,39 @@ fn deal(
     }
     *pointer = PointerState::default();
     table.0 = Klondike::deal(shuffle_deck());
-    // All cards start on the stock, then glide out to their dealt positions.
-    let start = pile_origin(Pile::Stock).extend(1.0);
+    // All cards start face down on the stock, then glide out to their dealt positions.
+    let stock = pile_origin(Pile::Stock);
     entities.0 = new_deck()
         .into_iter()
-        .map(|card| {
+        .enumerate()
+        .map(|(i, card)| {
+            let height = REST_HEIGHT + i as f32 * CARD_GAP;
+            let start = to_world(stock, height);
             let entity = commands
                 .spawn((
-                    CardSprite(card),
-                    Sprite {
-                        image: images.back.clone(),
-                        custom_size: Some(Vec2::new(CARD_W, CARD_H)),
-                        ..default()
+                    CardView {
+                        card,
+                        target: start,
+                        face_up: false,
+                        height,
                     },
-                    Transform::from_translation(start),
-                    Target(start),
-                    QueuedZ(start.z),
+                    Transform::from_translation(start).with_rotation(card_rotation(false)),
+                    Visibility::default(),
+                    children![
+                        (
+                            Mesh3d(assets.mesh.clone()),
+                            MeshMaterial3d(assets.faces[&card].clone()),
+                            Transform::from_xyz(0.0, 0.0, FACE_SEPARATION),
+                        ),
+                        (
+                            Mesh3d(assets.mesh.clone()),
+                            MeshMaterial3d(assets.back.clone()),
+                            // Facing the other way: with back-face culling only one side of the
+                            // card is ever drawn, so the face can't show through the back.
+                            Transform::from_xyz(0.0, 0.0, -FACE_SEPARATION)
+                                .with_rotation(Quat::from_rotation_y(PI)),
+                        ),
+                    ],
                 ))
                 .id();
             (card, entity)
@@ -193,21 +260,23 @@ fn read_pointer(
 #[allow(clippy::too_many_arguments)]
 fn pointer_input(
     window: Single<&Window, With<PrimaryWindow>>,
-    camera: Single<(&Camera, &GlobalTransform)>,
+    camera: Single<(&Camera, &GlobalTransform), With<TableCamera>>,
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
     time: Res<Time>,
     entities: Res<CardEntities>,
     mut table: ResMut<Table>,
     mut pointer: ResMut<PointerState>,
-    mut transforms: Query<&mut Transform, With<CardSprite>>,
+    mut cards: Query<(&mut Transform, &mut CardView)>,
 ) {
     let (camera, camera_transform) = *camera;
-    let to_world = |pos: Vec2| camera.viewport_to_world_2d(camera_transform, pos).ok();
+    let on_plane = |pos: Vec2, height: f32| pointer_on_plane(camera, camera_transform, pos, height);
     let (pressed, released, current) = read_pointer(&window, &mouse, &touches);
 
     let pressed = pressed.filter(|pos| pos.y > HUD_HEIGHT_PX);
-    if let Some(point) = pressed.and_then(to_world) {
+    if let Some(pos) = pressed
+        && let Some(point) = on_plane(pos, REST_HEIGHT)
+    {
         let game = &table.0;
         match hit_test(game, point) {
             Some((Pile::Stock, _)) => {
@@ -222,15 +291,15 @@ fn pointer_input(
                     .is_some_and(|(last, at)| last == card && now - at < DOUBLE_CLICK_SECS);
                 if double_click && is_top && table.0.move_to_foundation(pile) {
                     pointer.last_press = None;
-                } else {
+                } else if let Some(drag_point) = on_plane(pos, DRAG_HEIGHT) {
                     pointer.last_press = Some((card, now));
                     let game = &table.0;
                     pointer.drag = Some(Drag {
                         from: pile,
                         index,
                         cards: game.pile(pile)[index..].iter().map(|s| s.card).collect(),
-                        grab_offset: card_position(game, pile, index) - point,
-                        pointer: point,
+                        grab_offset: card_position(game, pile, index) - drag_point,
+                        pointer: drag_point,
                     });
                 }
             }
@@ -241,14 +310,16 @@ fn pointer_input(
     let Some(drag) = pointer.drag.as_mut() else {
         return;
     };
-    if let Some(point) = current.and_then(to_world) {
+    if let Some(point) = current.and_then(|pos| on_plane(pos, DRAG_HEIGHT)) {
         drag.pointer = point;
     }
     let lead = drag.pointer + drag.grab_offset;
     for (i, card) in drag.cards.iter().enumerate() {
-        if let Ok(mut transform) = transforms.get_mut(entities.0[card]) {
+        if let Ok((mut transform, mut view)) = cards.get_mut(entities.0[card]) {
             let offset = Vec2::new(0.0, i as f32 * FACE_UP_OFFSET);
-            transform.translation = (lead - offset).extend(Z_DRAGGING + i as f32);
+            let height = DRAG_HEIGHT + i as f32 * CARD_GAP;
+            transform.translation = to_world(lead - offset, height);
+            view.height = height;
         }
     }
 
@@ -258,6 +329,8 @@ fn pointer_input(
         if let Some(to) = drop_target(&table.0, lead) {
             table.0.try_move(drag.from, drag.index, to);
         }
+        // Even if the move failed, the cards must glide back to their piles.
+        table.set_changed();
     }
 }
 
@@ -268,81 +341,67 @@ fn check_win(table: Res<Table>, mut game_state: ResMut<NextState<GameState>>) {
     }
 }
 
-/// Sets each card's face and resting place from the game state.
+/// Sets where each card should rest, and which way up, from the game state.
 fn sync_cards(
     table: Res<Table>,
     pointer: Res<PointerState>,
-    images: Option<Res<CardImages>>,
     entities: Res<CardEntities>,
-    mut cards: Query<(&mut Sprite, &mut Target), With<CardSprite>>,
+    mut cards: Query<&mut CardView>,
 ) {
-    let Some(images) = images else {
+    if !table.is_changed() && !pointer.is_changed() {
         return;
-    };
+    }
     let game = &table.0;
     for pile in Klondike::all_piles() {
         for (index, slot) in game.pile(pile).iter().enumerate() {
-            let Some(Ok((mut sprite, mut target))) =
-                entities.0.get(&slot.card).map(|&e| cards.get_mut(e))
-            else {
+            let Some(Ok(mut view)) = entities.0.get(&slot.card).map(|&e| cards.get_mut(e)) else {
                 continue;
             };
-            let image = if slot.face_up {
-                &images.faces[&slot.card]
-            } else {
-                &images.back
-            };
-            if sprite.image != *image {
-                sprite.image = image.clone();
-            }
+            view.face_up = slot.face_up;
             if !pointer.is_dragging(&slot.card) {
-                let z = 1.0 + index as f32 * 0.5;
-                target.0 = card_position(game, pile, index).extend(z);
+                let height = REST_HEIGHT + index as f32 * CARD_GAP;
+                view.target = to_world(card_position(game, pile, index), height);
             }
         }
     }
 }
 
-/// Glides cards toward their [`Target`].
+/// Glides cards toward their targets, lifting them over other cards on the way, and turns them
+/// over.
 fn animate_cards(
     time: Res<Time>,
     pointer: Res<PointerState>,
-    mut cards: Query<(&CardSprite, &mut Transform, &Target)>,
+    mut cards: Query<(&mut Transform, &mut CardView)>,
 ) {
-    let t = 1.0 - (-GLIDE_SPEED * time.delta_secs()).exp();
-    for (card, mut transform, target) in &mut cards {
-        if pointer.is_dragging(&card.0) {
+    let dt = time.delta_secs();
+    let glide = 1.0 - (-GLIDE_SPEED * dt).exp();
+    let flip = 1.0 - (-FLIP_SPEED * dt).exp();
+    for (mut transform, mut view) in &mut cards {
+        let goal_rotation = card_rotation(view.face_up);
+        transform.rotation = if transform.rotation.angle_between(goal_rotation) < 0.01 {
+            goal_rotation
+        } else {
+            transform.rotation.slerp(goal_rotation, flip)
+        };
+        if pointer.is_dragging(&view.card) {
             continue;
         }
-        let goal = target.0.truncate();
-        let mut position = transform.translation.truncate().lerp(goal, t);
+
+        let goal = to_table(view.target);
+        let mut position = to_table(transform.translation).lerp(goal, glide);
         if position.distance(goal) < 0.5 {
             position = goal;
         }
-        let z = if position == goal {
-            target.0.z
-        } else {
-            Z_MOVING + target.0.z
-        };
-        transform.translation = position.extend(z);
-    }
-}
-
-/// Makes the renderer re-sort cards whose z changed.
-///
-/// In Bevy 0.20, a (blended) sprite's place in the draw order is only recomputed when it is
-/// re-queued for rendering, which does not happen when only its `Transform` changes. Without this,
-/// a moved card keeps its old draw order and can be drawn under the card it was placed on.
-/// Marking its `Mesh2d` as changed re-queues it with its current z.
-///
-/// (Alpha-masked sprites avoid this through depth testing, but did not render at all on some
-/// mobile GPUs.)
-fn refresh_draw_order(mut cards: Query<(&Transform, &mut QueuedZ, &mut Mesh2d), With<CardSprite>>) {
-    for (transform, mut queued_z, mut mesh) in &mut cards {
-        if transform.translation.z != queued_z.0 {
-            queued_z.0 = transform.translation.z;
-            mesh.set_changed();
+        let travelling = position.distance(goal) > 2.0;
+        let goal_height = view.target.y + if travelling { TRAVEL_LIFT } else { 0.0 };
+        view.height += (goal_height - view.height) * glide;
+        if (view.height - goal_height).abs() < 0.05 {
+            view.height = goal_height;
         }
+        // While turning over, raise the card by enough that its edge clears the table.
+        let tilt = transform.rotation.angle_between(card_rotation(true));
+        let flip_lift = CARD_W / 2.0 * tilt.sin();
+        transform.translation = to_world(position, view.height + flip_lift);
     }
 }
 
