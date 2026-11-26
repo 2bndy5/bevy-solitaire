@@ -1,5 +1,7 @@
 //! Bevy systems that render the [`Klondike`] game and translate pointer input into moves.
-use bevy::{platform::collections::HashMap, prelude::*, window::PrimaryWindow};
+use bevy::{
+    platform::collections::HashMap, prelude::*, sprite::SpriteAlphaMode, window::PrimaryWindow,
+};
 
 use crate::{
     cards::{CARD_H, CARD_W, Card, new_deck, shuffle_deck},
@@ -140,6 +142,11 @@ fn deal(
                     Sprite {
                         image: images.back.clone(),
                         custom_size: Some(Vec2::new(CARD_W, CARD_H)),
+                        // Alpha-masked sprites are depth tested, so a card's z always decides
+                        // what it is drawn over. (Blended sprites keep the draw order they had
+                        // when their material last changed, so moved cards could end up under
+                        // the cards they were placed on.)
+                        alpha_mode: SpriteAlphaMode::Mask(0.5),
                         ..default()
                     },
                     Transform::from_translation(start),
