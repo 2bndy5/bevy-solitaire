@@ -1,7 +1,5 @@
 //! Bevy systems that render the [`Klondike`] game and translate pointer input into moves.
-use bevy::{
-    platform::collections::HashMap, prelude::*, sprite::SpriteAlphaMode, window::PrimaryWindow,
-};
+use bevy::{platform::collections::HashMap, prelude::*, window::PrimaryWindow};
 
 use crate::{
     cards::{CARD_H, CARD_W, Card, new_deck, shuffle_deck},
@@ -43,6 +41,10 @@ struct CardSprite(Card);
 /// Where a card should come to rest.
 #[derive(Component)]
 struct Target(Vec3);
+
+/// The z a card had when its draw order was last refreshed. See [`refresh_draw_order`].
+#[derive(Component)]
+struct QueuedZ(f32);
 
 /// Cards currently picked up by the pointer.
 struct Drag {
@@ -89,6 +91,10 @@ impl Plugin for TablePlugin {
             .add_systems(
                 Update,
                 (sync_cards, animate_cards, update_moves_text).chain(),
+            )
+            .add_systems(
+                Update,
+                refresh_draw_order.after(animate_cards).after(pointer_input),
             );
     }
 }
@@ -142,15 +148,11 @@ fn deal(
                     Sprite {
                         image: images.back.clone(),
                         custom_size: Some(Vec2::new(CARD_W, CARD_H)),
-                        // Alpha-masked sprites are depth tested, so a card's z always decides
-                        // what it is drawn over. (Blended sprites keep the draw order they had
-                        // when their material last changed, so moved cards could end up under
-                        // the cards they were placed on.)
-                        alpha_mode: SpriteAlphaMode::Mask(0.5),
                         ..default()
                     },
                     Transform::from_translation(start),
                     Target(start),
+                    QueuedZ(start.z),
                 ))
                 .id();
             (card, entity)
@@ -323,6 +325,24 @@ fn animate_cards(
             Z_MOVING + target.0.z
         };
         transform.translation = position.extend(z);
+    }
+}
+
+/// Makes the renderer re-sort cards whose z changed.
+///
+/// In Bevy 0.20, a (blended) sprite's place in the draw order is only recomputed when it is
+/// re-queued for rendering, which does not happen when only its `Transform` changes. Without this,
+/// a moved card keeps its old draw order and can be drawn under the card it was placed on.
+/// Marking its `Mesh2d` as changed re-queues it with its current z.
+///
+/// (Alpha-masked sprites avoid this through depth testing, but did not render at all on some
+/// mobile GPUs.)
+fn refresh_draw_order(mut cards: Query<(&Transform, &mut QueuedZ, &mut Mesh2d), With<CardSprite>>) {
+    for (transform, mut queued_z, mut mesh) in &mut cards {
+        if transform.translation.z != queued_z.0 {
+            queued_z.0 = transform.translation.z;
+            mesh.set_changed();
+        }
     }
 }
 
