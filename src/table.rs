@@ -6,7 +6,9 @@ use bevy::{platform::collections::HashMap, prelude::*, window::PrimaryWindow};
 
 use crate::{
     cards::{CARD_H, CARD_W, Card, new_deck, shuffle_deck},
+    celebrate::Flying,
     game::{Klondike, Pile},
+    hud::UndoRequested,
     layout::{HUD_HEIGHT_PX, Layout},
     scene::{TableCamera, pointer_on_plane, to_table, to_world},
     state::GameState,
@@ -19,7 +21,7 @@ const FLIP_SPEED: f32 = 12.0;
 /// Two presses on the same card within this many seconds count as a double-click.
 const DOUBLE_CLICK_SECS: f64 = 0.4;
 /// Height of the bottom card of a pile above the felt.
-const REST_HEIGHT: f32 = 0.5;
+pub const REST_HEIGHT: f32 = 0.5;
 /// Height between cards stacked in a pile.
 ///
 /// Generous enough that stacked cards never compete for the same depth (z-fighting), even with
@@ -31,6 +33,14 @@ const TRAVEL_LIFT: f32 = 25.0;
 const DRAG_HEIGHT: f32 = 40.0;
 /// Gap between a card's face and back quads.
 const FACE_SEPARATION: f32 = 0.05;
+/// Delay before auto-finish starts, once the game is certainly winnable.
+const AUTO_FINISH_DELAY: f32 = 0.5;
+/// Time between the first auto-finish moves.
+const AUTO_FINISH_FIRST_INTERVAL: f32 = 0.35;
+/// Each auto-finish move comes this much sooner than the one before.
+const AUTO_FINISH_ACCELERATION: f32 = 0.85;
+/// The shortest time between auto-finish moves.
+const AUTO_FINISH_MIN_INTERVAL: f32 = 0.03;
 
 /// The game being played.
 #[derive(Resource, Default)]
@@ -47,7 +57,26 @@ struct CardAssets {
 
 /// Maps each card to the entity that renders it.
 #[derive(Resource, Default)]
-struct CardEntities(HashMap<Card, Entity>);
+pub struct CardEntities(pub HashMap<Card, Entity>);
+
+/// Plays a game that is certainly winnable to the end, ever faster.
+#[derive(Resource, Default)]
+struct AutoFinish {
+    /// When the next move is due (seconds since the app started), once auto-finish has begun.
+    next_move_at: Option<f64>,
+    /// Time until the move after that.
+    interval: f32,
+}
+
+/// Speeds up card animations (1 is normal speed), so they keep up with auto-finish.
+#[derive(Resource)]
+struct AnimationSpeed(f32);
+
+impl Default for AnimationSpeed {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
 
 /// A card on the table, and where it is heading.
 #[derive(Component)]
@@ -84,10 +113,6 @@ impl PointerState {
     }
 }
 
-/// Marks the HUD text showing the move count.
-#[derive(Component)]
-struct MovesText;
-
 pub struct TablePlugin;
 
 impl Plugin for TablePlugin {
@@ -95,21 +120,18 @@ impl Plugin for TablePlugin {
         app.init_resource::<Table>()
             .init_resource::<CardEntities>()
             .init_resource::<PointerState>()
+            .init_resource::<AutoFinish>()
+            .init_resource::<AnimationSpeed>()
             .add_systems(Startup, (load_card_assets, spawn_slots).chain())
             .add_systems(Update, place_outlines)
-            .add_systems(OnEnter(GameState::Deal), deal)
+            .add_systems(OnEnter(GameState::Deal), (deal, reset_auto_finish))
             .add_systems(
                 Update,
-                (pointer_input, check_win)
+                (pointer_input, undo_input, auto_finish, check_win)
                     .chain()
                     .run_if(in_state(GameState::Play)),
             )
-            .add_systems(
-                Update,
-                (sync_cards, animate_cards, update_moves_text)
-                    .chain()
-                    .after(pointer_input),
-            );
+            .add_systems(Update, (sync_cards, animate_cards).chain().after(check_win));
     }
 }
 
@@ -118,7 +140,7 @@ impl Plugin for TablePlugin {
 /// A card's meshes lie in their local XY plane with the face toward +Z. Face up, that +Z points up
 /// (+Y) and the card's top points away from the player (-Z). Face down, the card is additionally
 /// turned over about its long side.
-fn card_rotation(face_up: bool) -> Quat {
+pub fn card_rotation(face_up: bool) -> Quat {
     let face_up_rotation = Quat::from_rotation_x(-FRAC_PI_2);
     if face_up {
         face_up_rotation
@@ -282,8 +304,13 @@ fn pointer_input(
     layout: Res<Layout>,
     mut table: ResMut<Table>,
     mut pointer: ResMut<PointerState>,
+    auto_finish: Res<AutoFinish>,
     mut cards: Query<(&mut Transform, &mut CardView)>,
 ) {
+    if auto_finish.next_move_at.is_some() {
+        // The game is finishing itself.
+        return;
+    }
     let (camera, camera_transform) = *camera;
     let on_plane = |pos: Vec2, height: f32| pointer_on_plane(camera, camera_transform, pos, height);
     let (pressed, released, current) = read_pointer(&window, &mouse, &touches);
@@ -349,6 +376,74 @@ fn pointer_input(
     }
 }
 
+/// Takes back the last move when the Undo button is pressed (or Ctrl+Z, Cmd+Z or U).
+fn undo_input(
+    mut requested: ResMut<UndoRequested>,
+    keys: Res<ButtonInput<KeyCode>>,
+    pointer: Res<PointerState>,
+    auto_finish: Res<AutoFinish>,
+    mut table: ResMut<Table>,
+) {
+    let modifier = keys.any_pressed([
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::SuperLeft,
+        KeyCode::SuperRight,
+    ]);
+    let shortcut =
+        keys.just_pressed(KeyCode::KeyU) || (modifier && keys.just_pressed(KeyCode::KeyZ));
+    let button = std::mem::take(&mut requested.0);
+    if button || shortcut {
+        // Not while cards are in hand, or while the game is finishing itself.
+        if pointer.drag.is_none() && auto_finish.next_move_at.is_none() && table.0.can_undo() {
+            table.0.undo();
+        }
+    }
+}
+
+/// Clears per-game state for a new deal.
+fn reset_auto_finish(
+    mut auto_finish: ResMut<AutoFinish>,
+    mut speed: ResMut<AnimationSpeed>,
+    mut undo: ResMut<UndoRequested>,
+) {
+    *auto_finish = AutoFinish::default();
+    *speed = AnimationSpeed::default();
+    undo.0 = false;
+}
+
+/// Once the game is certainly winnable, plays it out to the end, each move coming sooner than the
+/// last, and speeds up the card animations to match.
+fn auto_finish(
+    time: Res<Time>,
+    pointer: Res<PointerState>,
+    mut auto_finish: ResMut<AutoFinish>,
+    mut speed: ResMut<AnimationSpeed>,
+    mut table: ResMut<Table>,
+) {
+    let now = time.elapsed_secs_f64();
+    let Some(due) = auto_finish.next_move_at else {
+        if pointer.drag.is_none() && !table.0.is_won() && table.0.is_certainly_winnable() {
+            info!("Auto-finishing");
+            auto_finish.next_move_at = Some(now + f64::from(AUTO_FINISH_DELAY));
+            auto_finish.interval = AUTO_FINISH_FIRST_INTERVAL;
+        }
+        return;
+    };
+    if now < due {
+        return;
+    }
+    if !table.0.auto_finish_step() {
+        auto_finish.next_move_at = None;
+        return;
+    }
+    let interval = auto_finish.interval;
+    auto_finish.next_move_at = Some(now + f64::from(interval));
+    auto_finish.interval = (interval * AUTO_FINISH_ACCELERATION).max(AUTO_FINISH_MIN_INTERVAL);
+    // Animations speed up as the moves do, so cards don't lag far behind.
+    speed.0 = (AUTO_FINISH_FIRST_INTERVAL / interval).sqrt().max(1.0);
+}
+
 fn check_win(table: Res<Table>, mut game_state: ResMut<NextState<GameState>>) {
     if table.is_changed() && table.0.is_won() {
         info!("Won in {} moves", table.0.moves);
@@ -387,9 +482,10 @@ fn sync_cards(
 fn animate_cards(
     time: Res<Time>,
     pointer: Res<PointerState>,
-    mut cards: Query<(&mut Transform, &mut CardView)>,
+    speed: Res<AnimationSpeed>,
+    mut cards: Query<(&mut Transform, &mut CardView), Without<Flying>>,
 ) {
-    let dt = time.delta_secs();
+    let dt = time.delta_secs() * speed.0;
     let glide = 1.0 - (-GLIDE_SPEED * dt).exp();
     let flip = 1.0 - (-FLIP_SPEED * dt).exp();
     for (mut transform, mut view) in &mut cards {
@@ -418,40 +514,5 @@ fn animate_cards(
         let tilt = transform.rotation.angle_between(card_rotation(true));
         let flip_lift = CARD_W / 2.0 * tilt.sin();
         transform.translation = to_world(position, view.height + flip_lift);
-    }
-}
-
-/// Spawns the heads-up display: move counter and a "New Game" button.
-pub fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let font = TextFont {
-        font: FontSource::Handle(asset_server.load("fonts/UbuntuNerdFont-Medium.ttf")),
-        font_size: FontSize::Px(20.0),
-        ..default()
-    };
-    commands.spawn((
-        Node {
-            width: Val::Percent(100.0),
-            padding: UiRect::axes(Val::Px(16.0), Val::Px(6.0)),
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        children![
-            (
-                Text::new("Moves: 0"),
-                TextColor(Color::WHITE),
-                font.clone(),
-                MovesText
-            ),
-            crate::menu::start_button("\u{F0453} New Game", font),
-        ],
-    ));
-}
-
-fn update_moves_text(table: Res<Table>, mut text: Query<&mut Text, With<MovesText>>) {
-    if table.is_changed() {
-        for mut text in &mut text {
-            text.0 = format!("Moves: {}", table.0.moves);
-        }
     }
 }

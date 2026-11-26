@@ -51,6 +51,8 @@ pub struct Klondike {
     tableaus: [Vec<Slot>; Pile::TABLEAUS],
     /// Number of moves made (draws, recycles and card moves).
     pub moves: u32,
+    /// The states before each move, most recent last, for [`Klondike::undo`].
+    history: Vec<Klondike>,
 }
 
 impl Klondike {
@@ -106,6 +108,10 @@ impl Klondike {
     /// If the stock is empty, the waste is turned over to become the stock again.
     /// Returns `false` if there was nothing to draw or recycle.
     pub fn draw(&mut self) -> bool {
+        if self.stock.is_empty() && self.waste.is_empty() {
+            return false;
+        }
+        self.save();
         if let Some(mut slot) = self.stock.pop() {
             slot.face_up = true;
             self.waste.push(slot);
@@ -116,8 +122,6 @@ impl Klondike {
                 .rev()
                 .map(|s| Slot::down(s.card))
                 .collect();
-        } else {
-            return false;
         }
         self.moves += 1;
         true
@@ -182,6 +186,7 @@ impl Klondike {
         if !self.can_move(from, index, to) {
             return false;
         }
+        self.save();
         let moved = self.pile_mut(from).split_off(index);
         self.pile_mut(to).extend(moved);
         if let Pile::Tableau(_) = from
@@ -213,11 +218,239 @@ impl Klondike {
     pub fn is_won(&self) -> bool {
         self.foundations.iter().all(|f| f.len() == Rank::ALL.len())
     }
+
+    /// A game with only `cards` on the table, face up in the waste (the last card on top).
+    #[cfg(test)]
+    pub fn with_waste(cards: Vec<Card>) -> Self {
+        Self {
+            waste: cards.into_iter().map(Slot::up).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Remembers the current state so the next move can be undone.
+    fn save(&mut self) {
+        let snapshot = Klondike {
+            stock: self.stock.clone(),
+            waste: self.waste.clone(),
+            foundations: self.foundations.clone(),
+            tableaus: self.tableaus.clone(),
+            moves: self.moves,
+            history: Vec::new(),
+        };
+        self.history.push(snapshot);
+    }
+
+    /// Is there a move to undo?
+    pub fn can_undo(&self) -> bool {
+        !self.history.is_empty()
+    }
+
+    /// Takes back the last move (including turning back over any card it exposed).
+    ///
+    /// Returns `false` if there was nothing to undo.
+    pub fn undo(&mut self) -> bool {
+        let Some(previous) = self.history.pop() else {
+            return false;
+        };
+        let history = std::mem::take(&mut self.history);
+        *self = Klondike {
+            history,
+            ..previous
+        };
+        true
+    }
+
+    /// Is the game certain to be won from here?
+    ///
+    /// Once the stock is empty and every tableau card is face up, the cards can always be played
+    /// to the foundations: each tableau pile is a descending run, so the lowest card still in
+    /// play is on top of its pile, or can be reached by cycling through the waste.
+    pub fn is_certainly_winnable(&self) -> bool {
+        self.stock.is_empty() && self.tableaus.iter().flatten().all(|slot| slot.face_up)
+    }
+
+    /// Makes one move toward finishing a game that [is certainly winnable].
+    ///
+    /// Plays the lowest-ranked card that can go to a foundation; when none can, draws from (or
+    /// recycles) the waste. Returns `false` once there is nothing left to do.
+    ///
+    /// [is certainly winnable]: Klondike::is_certainly_winnable
+    pub fn auto_finish_step(&mut self) -> bool {
+        let best = std::iter::once(Pile::Waste)
+            .chain((0..Pile::TABLEAUS).map(Pile::Tableau))
+            .filter(|&pile| self.foundation_for(pile).is_some())
+            .min_by_key(|&pile| self.pile(pile).last().map(|slot| slot.card.rank));
+        match best {
+            Some(pile) => self.move_to_foundation(pile),
+            None => !self.is_won() && self.draw(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Plays [`Klondike::auto_finish_step`] until it stops, failing if it seems stuck.
+    fn auto_finish(game: &mut Klondike) {
+        for _ in 0..10_000 {
+            if !game.auto_finish_step() {
+                return;
+            }
+        }
+        panic!("auto-finish did not stop");
+    }
+
+    #[test]
+    fn undo_restores_previous_states() {
+        let mut game = Klondike::deal(new_deck());
+        assert!(!game.can_undo());
+        assert!(!game.undo());
+
+        let dealt = game.clone();
+        let mut after_draw = None;
+        for _ in 0..30 {
+            // draws, then recycles the waste
+            assert!(game.draw());
+            after_draw.get_or_insert_with(|| game.clone());
+        }
+        let after_draw = after_draw.unwrap();
+        for _ in 0..29 {
+            assert!(game.undo());
+        }
+        assert_eq!(game.pile(Pile::Waste), after_draw.pile(Pile::Waste));
+        assert_eq!(game.pile(Pile::Stock), after_draw.pile(Pile::Stock));
+        assert_eq!(game.moves, 1);
+        assert!(game.undo());
+        for pile in Klondike::all_piles() {
+            assert_eq!(game.pile(pile), dealt.pile(pile));
+        }
+        assert_eq!(game.moves, 0);
+        assert!(!game.can_undo());
+    }
+
+    #[test]
+    fn undo_turns_exposed_card_back_over() {
+        let mut game = Klondike {
+            tableaus: [
+                vec![
+                    Slot::down(card(Rank::Four, Suit::Clubs)),
+                    Slot::up(card(Rank::Ace, Suit::Hearts)),
+                ],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+            ],
+            ..Default::default()
+        };
+        assert!(game.move_to_foundation(Pile::Tableau(0)));
+        assert!(game.pile(Pile::Tableau(0))[0].face_up);
+        assert!(game.undo());
+        assert_eq!(
+            game.pile(Pile::Tableau(0)),
+            &[
+                Slot::down(card(Rank::Four, Suit::Clubs)),
+                Slot::up(card(Rank::Ace, Suit::Hearts)),
+            ]
+        );
+        assert!(game.pile(Pile::Foundation(0)).is_empty());
+    }
+
+    #[test]
+    fn failed_moves_are_not_recorded() {
+        let mut game = Klondike::default();
+        assert!(!game.draw());
+        assert!(!game.try_move(Pile::Waste, 0, Pile::Foundation(0)));
+        assert!(!game.can_undo());
+    }
+
+    #[test]
+    fn certainly_winnable() {
+        let game = Klondike::deal(new_deck());
+        assert!(
+            !game.is_certainly_winnable(),
+            "stock and face-down cards remain"
+        );
+
+        // Everything face up in the tableau, with some cards still in the waste.
+        let mut deck = new_deck();
+        let mut game = Klondike::default();
+        for (i, card) in deck.drain(..40).enumerate() {
+            game.tableaus[i % Pile::TABLEAUS].push(Slot::up(card));
+        }
+        game.waste = deck.into_iter().map(Slot::up).collect();
+        assert!(game.is_certainly_winnable());
+        game.tableaus[2][0].face_up = false;
+        assert!(!game.is_certainly_winnable());
+    }
+
+    #[test]
+    fn auto_finish_wins_from_any_face_up_position() {
+        // Lay out shuffled decks with every card face up: tableau piles as descending,
+        // alternating runs (as real play leaves them) and everything else in the waste.
+        // Auto-finish must clear the table, cycling the waste as needed.
+        for seed in 0..50u64 {
+            let mut deck = new_deck();
+            // A simple deterministic shuffle.
+            let mut state = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            for i in (1..deck.len()).rev() {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                deck.swap(i, (state >> 33) as usize % (i + 1));
+            }
+            let mut game = Klondike::default();
+            let mut rest = Vec::new();
+            for card in deck {
+                let fits = game.tableaus.iter().position(|pile| match pile.last() {
+                    None => card.rank == Rank::King,
+                    Some(top) => {
+                        top.card.is_red() != card.is_red()
+                            && card.rank.as_u8() + 1 == top.card.rank.as_u8()
+                    }
+                });
+                match fits {
+                    Some(i) => game.tableaus[i].push(Slot::up(card)),
+                    None => rest.push(Slot::up(card)),
+                }
+            }
+            game.waste = rest;
+            assert!(game.is_certainly_winnable());
+            auto_finish(&mut game);
+            assert!(game.is_won(), "seed {seed} not finished");
+        }
+    }
+
+    #[test]
+    fn auto_finish_plays_lowest_card_first() {
+        let mut game = Klondike {
+            waste: vec![Slot::up(card(Rank::Two, Suit::Spades))],
+            tableaus: [
+                vec![Slot::up(card(Rank::Ace, Suit::Spades))],
+                vec![Slot::up(card(Rank::Ace, Suit::Hearts))],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+            ],
+            ..Default::default()
+        };
+        assert!(game.auto_finish_step());
+        assert!(game.pile(Pile::Waste).len() == 1, "an ace goes first");
+        auto_finish(&mut game);
+        assert!(game.pile(Pile::Waste).is_empty());
+        assert_eq!(
+            game.pile(Pile::Foundation(0)).len() + game.pile(Pile::Foundation(1)).len(),
+            3
+        );
+    }
     use crate::cards::{Suit, new_deck};
 
     fn card(rank: Rank, suit: Suit) -> Card {
