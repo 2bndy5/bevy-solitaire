@@ -9,12 +9,10 @@ use bevy::{
     light::CascadeShadowConfigBuilder, prelude::*, render::view::Tonemapping, window::PrimaryWindow,
 };
 
-use crate::{layout::TABLE_SIZE, state::GameState};
+use crate::{layout::Layout, state::GameState};
 
 /// The color of the felt on the card table.
 pub const FELT: Color = Color::srgb(0.11, 0.42, 0.23);
-/// How far the camera leans back from looking straight down.
-const CAMERA_TILT: f32 = 0.3; // radians (about 17 degrees)
 /// The camera's vertical field of view. Narrow, to keep perspective distortion gentle.
 const CAMERA_FOV: f32 = FRAC_PI_6;
 /// Brightness of the light shining on the table.
@@ -24,8 +22,6 @@ const CAMERA_FOV: f32 = FRAC_PI_6;
 const SUN_LUX: f32 = 2200.0;
 /// Brightness of the ambient light, which keeps shadows from going black.
 const AMBIENT_BRIGHTNESS: f32 = 300.0;
-/// Extra room around the table when fitting it on screen.
-const FIT_MARGIN: f32 = 1.06;
 
 /// Converts a table point at `height` above the felt to a world position.
 pub fn to_world(point: Vec2, height: f32) -> Vec3 {
@@ -51,7 +47,8 @@ impl Plugin for ScenePlugin {
                 ..default()
             })
             .add_systems(Startup, setup_scene)
-            .add_systems(Update, fit_camera);
+            .init_resource::<Layout>()
+            .add_systems(Update, fit_to_window);
     }
 }
 
@@ -69,7 +66,7 @@ fn setup_scene(
             near: 10.0,
             ..default()
         }),
-        camera_transform(1000.0),
+        camera_transform(1000.0, Layout::default().camera_tilt),
         // Show the card art's colors as they are.
         Tonemapping::None,
     ));
@@ -100,28 +97,34 @@ fn setup_scene(
     game_state.set(GameState::Menu);
 }
 
-/// The camera's transform when it is `distance` away from the table's center.
-fn camera_transform(distance: f32) -> Transform {
+/// The camera's transform when it is `distance` away from the table's center, leaning back by
+/// `tilt` radians.
+fn camera_transform(distance: f32, tilt: f32) -> Transform {
     // Lean back toward the player (+Z), keeping the far side of the table at the top of the
     // screen.
-    let eye = Vec3::new(0.0, CAMERA_TILT.cos(), CAMERA_TILT.sin()) * distance;
+    let eye = Vec3::new(0.0, tilt.cos(), tilt.sin()) * distance;
     Transform::from_translation(eye).looking_at(Vec3::ZERO, Vec3::NEG_Z)
 }
 
-/// Moves the camera so the whole table fits on screen, whatever the window's shape.
-fn fit_camera(
+/// Picks the table layout for the window's shape, and moves the camera so the whole table fits.
+fn fit_to_window(
     window: Single<&Window, (With<PrimaryWindow>, Changed<Window>)>,
+    mut layout: ResMut<Layout>,
     mut camera: Single<&mut Transform, With<TableCamera>>,
 ) {
     let size = window.size();
     if size.x <= 0.0 || size.y <= 0.0 {
         return;
     }
+    let new_layout = Layout::for_window(size);
+    if *layout != new_layout {
+        *layout = new_layout;
+    }
     let aspect = size.x / size.y;
     let half_fov = (CAMERA_FOV / 2.0).tan();
-    let half = TABLE_SIZE / 2.0 * FIT_MARGIN;
+    let half = layout.size / 2.0;
     let distance = (half.y / half_fov).max(half.x / (half_fov * aspect));
-    **camera = camera_transform(distance);
+    **camera = camera_transform(distance, layout.camera_tilt);
 }
 
 /// Where the pointer at `viewport_pos` meets a horizontal plane `height` above the table, in table
@@ -153,7 +156,7 @@ mod tests {
 
     #[test]
     fn camera_keeps_far_side_at_top() {
-        let transform = camera_transform(1000.0);
+        let transform = camera_transform(1000.0, 0.3);
         // The camera's "up" points away from the player (toward -Z, i.e. +y on the table).
         assert!(transform.up().z < 0.0);
         assert!(transform.translation.y > 0.0 && transform.translation.z > 0.0);

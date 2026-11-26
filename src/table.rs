@@ -7,7 +7,7 @@ use bevy::{platform::collections::HashMap, prelude::*, window::PrimaryWindow};
 use crate::{
     cards::{CARD_H, CARD_W, Card, new_deck, shuffle_deck},
     game::{Klondike, Pile},
-    layout::{FACE_UP_OFFSET, card_position, drop_target, hit_test, pile_origin},
+    layout::{HUD_HEIGHT_PX, Layout},
     scene::{TableCamera, pointer_on_plane, to_table, to_world},
     state::GameState,
 };
@@ -31,8 +31,6 @@ const TRAVEL_LIFT: f32 = 25.0;
 const DRAG_HEIGHT: f32 = 40.0;
 /// Gap between a card's face and back quads.
 const FACE_SEPARATION: f32 = 0.05;
-/// Presses this close (in logical pixels) to the top of the window belong to the HUD.
-const HUD_HEIGHT_PX: f32 = 40.0;
 
 /// The game being played.
 #[derive(Resource, Default)]
@@ -98,6 +96,7 @@ impl Plugin for TablePlugin {
             .init_resource::<CardEntities>()
             .init_resource::<PointerState>()
             .add_systems(Startup, (load_card_assets, spawn_slots).chain())
+            .add_systems(Update, place_outlines)
             .add_systems(OnEnter(GameState::Deal), deal)
             .add_systems(
                 Update,
@@ -159,24 +158,39 @@ fn load_card_assets(
     });
 }
 
-/// Spawns faint outlines marking where each pile goes.
+/// Marks the outline showing where a pile goes.
+#[derive(Component)]
+struct PileOutline(Pile);
+
+/// Spawns faint outlines marking where each pile goes. See [`place_outlines`].
 fn spawn_slots(mut commands: Commands, assets: Res<CardAssets>) {
     for pile in Klondike::all_piles() {
         commands.spawn((
+            PileOutline(pile),
             Mesh3d(assets.mesh.clone()),
             MeshMaterial3d(assets.slot.clone()),
-            Transform::from_translation(to_world(pile_origin(pile), 0.1))
-                .with_rotation(card_rotation(true))
-                .with_scale(Vec3::new(0.95, 0.96, 1.0)),
+            Transform::from_rotation(card_rotation(true)).with_scale(Vec3::new(0.95, 0.96, 1.0)),
         ));
     }
 }
 
+/// Moves the pile outlines into place whenever the layout changes.
+fn place_outlines(layout: Res<Layout>, mut outlines: Query<(&PileOutline, &mut Transform)>) {
+    if !layout.is_changed() {
+        return;
+    }
+    for (outline, mut transform) in &mut outlines {
+        transform.translation = to_world(layout.pile_origin(outline.0), 0.1);
+    }
+}
+
 /// Starts a new game: shuffles, deals, and spawns every card.
+#[allow(clippy::too_many_arguments)]
 fn deal(
     mut commands: Commands,
     old_cards: Query<Entity, With<CardView>>,
     assets: Res<CardAssets>,
+    layout: Res<Layout>,
     mut table: ResMut<Table>,
     mut entities: ResMut<CardEntities>,
     mut pointer: ResMut<PointerState>,
@@ -188,7 +202,7 @@ fn deal(
     *pointer = PointerState::default();
     table.0 = Klondike::deal(shuffle_deck());
     // All cards start face down on the stock, then glide out to their dealt positions.
-    let stock = pile_origin(Pile::Stock);
+    let stock = layout.pile_origin(Pile::Stock);
     entities.0 = new_deck()
         .into_iter()
         .enumerate()
@@ -265,6 +279,7 @@ fn pointer_input(
     touches: Res<Touches>,
     time: Res<Time>,
     entities: Res<CardEntities>,
+    layout: Res<Layout>,
     mut table: ResMut<Table>,
     mut pointer: ResMut<PointerState>,
     mut cards: Query<(&mut Transform, &mut CardView)>,
@@ -278,7 +293,7 @@ fn pointer_input(
         && let Some(point) = on_plane(pos, REST_HEIGHT)
     {
         let game = &table.0;
-        match hit_test(game, point) {
+        match layout.hit_test(game, point) {
             Some((Pile::Stock, _)) => {
                 table.0.draw();
             }
@@ -298,7 +313,7 @@ fn pointer_input(
                         from: pile,
                         index,
                         cards: game.pile(pile)[index..].iter().map(|s| s.card).collect(),
-                        grab_offset: card_position(game, pile, index) - drag_point,
+                        grab_offset: layout.card_position(game, pile, index) - drag_point,
                         pointer: drag_point,
                     });
                 }
@@ -316,7 +331,7 @@ fn pointer_input(
     let lead = drag.pointer + drag.grab_offset;
     for (i, card) in drag.cards.iter().enumerate() {
         if let Ok((mut transform, mut view)) = cards.get_mut(entities.0[card]) {
-            let offset = Vec2::new(0.0, i as f32 * FACE_UP_OFFSET);
+            let offset = Vec2::new(0.0, i as f32 * layout.face_up_offset);
             let height = DRAG_HEIGHT + i as f32 * CARD_GAP;
             transform.translation = to_world(lead - offset, height);
             view.height = height;
@@ -326,7 +341,7 @@ fn pointer_input(
     if released.is_some() || !(mouse.pressed(MouseButton::Left) || touches.iter().next().is_some())
     {
         let drag = pointer.drag.take().expect("checked above");
-        if let Some(to) = drop_target(&table.0, lead) {
+        if let Some(to) = layout.drop_target(&table.0, lead) {
             table.0.try_move(drag.from, drag.index, to);
         }
         // Even if the move failed, the cards must glide back to their piles.
@@ -346,9 +361,10 @@ fn sync_cards(
     table: Res<Table>,
     pointer: Res<PointerState>,
     entities: Res<CardEntities>,
+    layout: Res<Layout>,
     mut cards: Query<&mut CardView>,
 ) {
-    if !table.is_changed() && !pointer.is_changed() {
+    if !table.is_changed() && !pointer.is_changed() && !layout.is_changed() {
         return;
     }
     let game = &table.0;
@@ -360,7 +376,7 @@ fn sync_cards(
             view.face_up = slot.face_up;
             if !pointer.is_dragging(&slot.card) {
                 let height = REST_HEIGHT + index as f32 * CARD_GAP;
-                view.target = to_world(card_position(game, pile, index), height);
+                view.target = to_world(layout.card_position(game, pile, index), height);
             }
         }
     }
