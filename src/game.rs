@@ -214,6 +214,38 @@ impl Klondike {
         }
     }
 
+    /// Where a tap on the card at `index` in `from` should send it (with any cards on top of it).
+    ///
+    /// A lone top card goes to a foundation if it can. Otherwise the cards go to the first tableau
+    /// column that accepts them, searching rightward from (and wrapping around past) the column they
+    /// are in, so tapping again moves them on to the next option. A King already at the bottom of a
+    /// column is never moved to an empty one, since that changes nothing.
+    pub fn best_move(&self, from: Pile, index: usize) -> Option<Pile> {
+        if !self.can_pick_up(from, index) {
+            return None;
+        }
+        if index + 1 == self.pile(from).len()
+            && let Some(foundation) = self.foundation_for(from)
+        {
+            return Some(foundation);
+        }
+        let start = match from {
+            Pile::Tableau(column) => column + 1,
+            _ => 0,
+        };
+        let king_at_bottom = matches!(from, Pile::Tableau(_)) && index == 0;
+        (start..start + Pile::TABLEAUS)
+            .map(|column| Pile::Tableau(column % Pile::TABLEAUS))
+            .filter(|&to| !(king_at_bottom && self.pile(to).is_empty()))
+            .find(|&to| self.can_move(from, index, to))
+    }
+
+    /// Makes the move [`Klondike::best_move`] suggests, returning where the cards went.
+    pub fn auto_move(&mut self, from: Pile, index: usize) -> Option<Pile> {
+        let to = self.best_move(from, index)?;
+        self.try_move(from, index, to).then_some(to)
+    }
+
     /// Have all cards been moved to the foundations?
     pub fn is_won(&self) -> bool {
         self.foundations.iter().all(|f| f.len() == Rank::ALL.len())
@@ -300,6 +332,79 @@ mod tests {
             }
         }
         panic!("auto-finish did not stop");
+    }
+
+    /// A game with only the given tableau columns (bottom card first, all face up).
+    fn with_tableaus(columns: &[&[Card]]) -> Klondike {
+        let mut game = Klondike::default();
+        for (i, cards) in columns.iter().enumerate() {
+            game.tableaus[i] = cards.iter().copied().map(Slot::up).collect();
+        }
+        game
+    }
+
+    #[test]
+    fn tap_prefers_foundation_for_top_card() {
+        let mut game = with_tableaus(&[
+            &[card(Rank::Two, Suit::Spades), card(Rank::Ace, Suit::Hearts)],
+            &[card(Rank::Two, Suit::Clubs)],
+        ]);
+        // The ace could go nowhere else; it goes home.
+        assert_eq!(
+            game.auto_move(Pile::Tableau(0), 1),
+            Some(Pile::Foundation(0))
+        );
+        // The two of clubs can't go to a foundation or onto the two of spades.
+        assert_eq!(game.best_move(Pile::Tableau(1), 0), None);
+    }
+
+    #[test]
+    fn tap_moves_to_first_tableau_after_source() {
+        let game = with_tableaus(&[
+            &[card(Rank::Six, Suit::Spades)],
+            &[card(Rank::Five, Suit::Hearts)],
+            &[card(Rank::Nine, Suit::Clubs)],
+            &[card(Rank::Six, Suit::Clubs)],
+        ]);
+        // From column 1, column 3 comes before wrapping around to column 0.
+        assert_eq!(game.best_move(Pile::Tableau(1), 0), Some(Pile::Tableau(3)));
+        let mut game = game;
+        assert_eq!(game.auto_move(Pile::Tableau(1), 0), Some(Pile::Tableau(3)));
+        // Tapping again moves it on to the next option.
+        assert_eq!(game.auto_move(Pile::Tableau(3), 1), Some(Pile::Tableau(0)));
+    }
+
+    #[test]
+    fn tap_moves_runs_and_waste_cards() {
+        let mut game = with_tableaus(&[
+            &[
+                card(Rank::Four, Suit::Clubs),
+                card(Rank::Nine, Suit::Spades),
+                card(Rank::Eight, Suit::Hearts),
+            ],
+            &[card(Rank::Ten, Suit::Diamonds)],
+        ]);
+        game.tableaus[0][0].face_up = false;
+        assert_eq!(game.best_move(Pile::Tableau(0), 0), None, "face down");
+        assert_eq!(game.auto_move(Pile::Tableau(0), 1), Some(Pile::Tableau(1)));
+        assert_eq!(game.pile(Pile::Tableau(1)).len(), 3);
+        assert!(game.pile(Pile::Tableau(0))[0].face_up);
+
+        game.waste = vec![Slot::up(card(Rank::Seven, Suit::Clubs))];
+        assert_eq!(game.auto_move(Pile::Waste, 0), Some(Pile::Tableau(1)));
+        assert_eq!(game.best_move(Pile::Stock, 0), None);
+    }
+
+    #[test]
+    fn tap_does_not_shuffle_kings_between_empty_columns() {
+        let game = with_tableaus(&[&[], &[card(Rank::King, Suit::Hearts)]]);
+        assert_eq!(game.best_move(Pile::Tableau(1), 0), None);
+        // But a King on top of other cards may move to an empty column.
+        let game = with_tableaus(&[
+            &[],
+            &[card(Rank::Two, Suit::Clubs), card(Rank::King, Suit::Hearts)],
+        ]);
+        assert_eq!(game.best_move(Pile::Tableau(1), 1), Some(Pile::Tableau(2)));
     }
 
     #[test]
