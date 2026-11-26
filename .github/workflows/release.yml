@@ -1,0 +1,326 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+
+env:
+  BINARY: bevy-solitaire
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions: {}
+
+jobs:
+
+  get-metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+      - name: Get project version
+        id: get_version
+        shell: python
+        run: |-
+          from os import environ
+          from tomllib import load
+          with open("Cargo.toml", "rb") as f:
+              cargo_toml = load(f)
+              version = cargo_toml["package"]["version"]
+              with open(environ["GITHUB_OUTPUT"], "a") as out:
+                  out.write(f"tag={version}\n")
+
+  # Build for wasm
+  build-wasm:
+    needs: [get-metadata]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup nushell
+        uses: hustcer/setup-nu@95cd3bfe252450ef7d35dd9a7ddecf3484341134 # v3.28
+      - name: Setup Rust toolchain
+        run: |-
+          rustup update --no-self-update
+          rustup target add wasm32-unknown-unknown
+      - name: Get wasm-bindgen version
+        id: wasm-bindgen-version
+        shell: nu {0}
+        run: |-
+          let lock_version = (
+            open Cargo.lock
+            | from toml
+            | get package
+            | where {($in | get name) == "wasm-bindgen"}
+            | first
+            | get version
+          )
+          $"version=($lock_version)" | save --append $env.GITHUB_OUTPUT
+      - name: install wasm-bindgen-cli
+        env:
+          WASM_BINDGEN_VERSION: ${{ steps.wasm-bindgen-version.outputs.version }}
+        run: |
+          cargo install wasm-bindgen-cli@${WASM_BINDGEN_VERSION} --locked
+
+      - name: Build
+        run: |
+          cargo build --release --target wasm32-unknown-unknown
+
+      - name: Prepare package
+        shell: bash
+        run: |-
+          wasm-bindgen --no-typescript --out-name bevy_game --out-dir wasm --target web target/wasm32-unknown-unknown/release/${BINARY}.wasm
+          cp -r assets wasm/ || true # Try to copy, but ignore if it can't copy if source directory does not exist
+
+      - name: Package as a zip
+        working-directory: ./wasm
+        shell: bash
+        env:
+          ASSET_NAME: ${{ env.BINARY }}-wasm-${{ needs.get-metadata.outputs.version }}.zip
+        run: |
+          zip --recurse-paths ../${BINARY}.zip .
+          mv ../${BINARY}.zip ../${ASSET_NAME}
+
+      - name: Upload binaries to artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.BINARY }}-wasm-${{ needs.get-metadata.outputs.version }}.zip
+          name: build-wasm
+
+      - name: Prepare GH-pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./wasm/
+
+  # Build for Linux
+  build-linux:
+    needs: [get-metadata]
+    runs-on: ubuntu-latest
+    name: build-linux-${{ matrix.name }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            name: x86_64
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Rust toolchain
+        run: |-
+          rustup update --no-self-update
+          rustup target add ${{ matrix.target }}
+
+      - name: Install dependencies
+        # spell-checker: disable
+        run: |-
+          sudo apt-get update;
+          sudo apt-get install \
+          pkg-config \
+          libx11-dev \
+          libasound2-dev \
+          libudev-dev \
+          libxcb-render0-dev \
+          libxcb-shape0-dev \
+          libxcb-xfixes0-dev \
+          libwayland-dev
+        # spell-checker: enable
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare package
+        shell: bash
+        run: |-
+          mkdir linux
+          cp target/${{ matrix.target }}/release/${BINARY} linux/
+          cp -r assets linux/ || true # Try to copy, but ignore if it can't copy if source directory does not exist
+
+      - name: Package as a zip
+        working-directory: ./linux
+        shell: bash
+        env:
+          ASSET_NAME: ${{ env.BINARY }}-${{ needs.get-metadata.outputs.version }}-${{ matrix.target }}.zip
+        run: |
+          zip --recurse-paths ../${BINARY}.zip .
+          mv ../${BINARY}.zip ../${ASSET_NAME}
+
+      - name: Upload binaries to artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.BINARY }}-${{ needs.get-metadata.outputs.version }}-${{ matrix.target }}.zip
+          name: build-linux-${{ matrix.name }}
+
+  # Build for Windows
+  build-windows:
+    needs: [get-metadata]
+    runs-on: ${{ matrix.runner }}
+    name: build-windows-${{ matrix.name }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            name: x86_64
+            runner: windows-latest
+          - target: aarch64-pc-windows-msvc
+            name: arm64
+            runner: windows-11-arm
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Rust toolchain
+        run: |-
+          rustup update --no-self-update
+          rustup target add ${{ matrix.target }}
+
+      - name: Build
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare package
+        shell: pwsh
+        run: |
+          mkdir windows
+          cp "target/${{ matrix.target }}/release/$env:BINARY.exe" windows/
+          mkdir assets -ea 0 # create the assets directory if it does not exist, it will get ignored in the zip if empty
+          cp -r assets windows/
+
+      - name: Package as a zip
+        shell: pwsh
+        env:
+          ASSET_NAME: ${{ env.BINARY }}-${{ needs.get-metadata.outputs.version }}-${{ matrix.target }}.zip
+        run: |
+          Compress-Archive -Path windows/* -DestinationPath "$env:BINARY.zip"
+          mv "$env:BINARY.zip" "$env:ASSET_NAME"
+
+      - name: Upload binaries to artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.BINARY }}-${{ needs.get-metadata.outputs.version }}-${{ matrix.target }}.zip
+          name: build-windows-${{ matrix.name }}
+
+  # Build for MacOS
+  build-macOS:
+    needs: [get-metadata]
+    runs-on: macOS-latest
+    name: build-macOS-${{ matrix.name }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            name: intel
+          - target: aarch64-apple-darwin
+            name: silicon
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Rust toolchain
+        run: |-
+          rustup update --no-self-update
+          rustup target add ${{ matrix.target }}
+      - name: Environment Setup (intel)
+        if: matrix.name == 'intel'
+        run: |-
+          export CFLAGS="-fno-stack-check"
+          export MACOSX_DEPLOYMENT_TARGET="10.9"
+      - name: Environment Setup (silicon)
+        if: matrix.name == 'silicon'
+        # macOS 11 was the first version to support ARM
+        run: |-
+          export MACOSX_DEPLOYMENT_TARGET="11"
+
+      - name: Build
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare Package
+        shell: bash
+        env:
+          ASSET_NAME: ${{ env.BINARY }}-${{ needs.get-metadata.outputs.version }}-${{ matrix.target }}.dmg
+        run: |
+          mkdir -p ${BINARY}.app/Contents/MacOS
+          cp target/${{ matrix.target }}/release/${BINARY} ${BINARY}.app/Contents/MacOS/
+          cp -r assets ${BINARY}.app/Contents/MacOS/ || true # Try to copy, but ignore if it can't copy if source directory does not exist
+          hdiutil create -fs HFS+ -volname "${BINARY}" -srcfolder ${BINARY}.app ${BINARY}-macOS-${{ matrix.name }}.dmg
+          mv ${BINARY}-macOS-${{ matrix.name }}.dmg ${ASSET_NAME}
+
+      - name: Upload binaries to artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.BINARY }}-${{ needs.get-metadata.outputs.version }}-${{ matrix.target }}.dmg
+          name: build-macOS-${{ matrix.name }}
+          retention-days: 1
+
+  release-assets:
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      # needed to upload release assets
+      contents: write
+    needs:
+      - build-wasm
+      - build-linux
+      - build-windows
+      - build-macOS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: build-*
+          merge-multiple: true
+          path: artifacts
+      - name: List assets
+        run: |-
+          assets=$(ls artifacts/*)
+          echo "Assets to upload:\n${assets}"
+      - name: Upload binaries to release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: >-
+          gh release upload
+          "${TAG}"
+          --repo "${REPO}"
+          $(ls artifacts/*)
+
+  deploy-gh-pages:
+    # We only want to deploy from
+    # 1. This fork. Not some other fork.
+    # 2. Pushes to the main
+    # 3. Pull requests targeting the main branch (see triggers at top of file)
+    # 4. Tags starting with "v" (to publish releases)
+    if: github.repository == '2bndy5/bevy-solitaire' && (github.ref == 'refs/heads/main' || github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v'))
+    needs: build-wasm
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy-gh-pages.outputs.page_url }}
+    permissions:
+      # to deploy to Pages
+      pages: write
+      # to verify the deployment originates from an appropriate source
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/deploy-pages@v5
+        id: deploy-gh-pages

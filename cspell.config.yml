@@ -1,0 +1,20 @@
+version: "0.2"
+words:
+  - Animatable
+  - bindgen
+  - bndy
+  - CFLAGS
+  - clippy
+  - Despawn
+  - Klondike
+  - lerp
+  - msvc
+  - nurfile
+  - Octicons
+  - rustup
+  - slerp
+  - srgb
+  - tableau
+  - tableaus
+  - tomllib
+  - volname
