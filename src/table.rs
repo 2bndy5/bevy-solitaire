@@ -430,18 +430,20 @@ fn auto_finish(
         }
         return;
     };
-    if now < due {
-        return;
+    // Make every move that is due; on a slow device several can fall due in one frame.
+    let mut due = due;
+    while now >= due {
+        if !table.0.auto_finish_step() {
+            auto_finish.next_move_at = None;
+            return;
+        }
+        let interval = auto_finish.interval;
+        due += f64::from(interval);
+        auto_finish.interval = (interval * AUTO_FINISH_ACCELERATION).max(AUTO_FINISH_MIN_INTERVAL);
+        // Animations speed up as the moves do, so cards don't lag far behind.
+        speed.0 = (AUTO_FINISH_FIRST_INTERVAL / interval).sqrt().max(1.0);
     }
-    if !table.0.auto_finish_step() {
-        auto_finish.next_move_at = None;
-        return;
-    }
-    let interval = auto_finish.interval;
-    auto_finish.next_move_at = Some(now + f64::from(interval));
-    auto_finish.interval = (interval * AUTO_FINISH_ACCELERATION).max(AUTO_FINISH_MIN_INTERVAL);
-    // Animations speed up as the moves do, so cards don't lag far behind.
-    speed.0 = (AUTO_FINISH_FIRST_INTERVAL / interval).sqrt().max(1.0);
+    auto_finish.next_move_at = Some(due);
 }
 
 fn check_win(table: Res<Table>, mut game_state: ResMut<NextState<GameState>>) {

@@ -16,11 +16,10 @@ pub fn font(asset_server: &AssetServer, size: f32) -> TextFont {
 #[derive(Component)]
 pub struct StartButton;
 
-/// A rounded button showing `label`, tagged with `marker` so systems can tell buttons apart.
-pub fn button(label: &str, font: TextFont, padding: UiRect, marker: impl Bundle) -> impl Bundle {
+/// The look of a button: a rounded, green box.
+pub fn button_node(padding: UiRect) -> impl Bundle {
     (
         Button,
-        marker,
         Node {
             padding,
             border_radius: BorderRadius::all(Val::Px(8.0)),
@@ -28,19 +27,17 @@ pub fn button(label: &str, font: TextFont, padding: UiRect, marker: impl Bundle)
             ..default()
         },
         BackgroundColor(Color::srgb(0.125, 0.6, 0.125)),
-        // TextFont component (pointing to nerd font asset) must be in same bundle as
-        // the Text component for the font to render the unicode code-point correctly.
-        children![(Text::new(label), TextColor(Color::WHITE), font)],
     )
 }
 
 /// A button that (re)starts the game when pressed.
 pub fn start_button(label: &str, font: TextFont) -> impl Bundle {
-    button(
-        label,
-        font,
-        UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
+    (
+        button_node(UiRect::axes(Val::Px(16.0), Val::Px(8.0))),
         StartButton,
+        // TextFont component (pointing to nerd font asset) must be in same bundle as
+        // the Text component for the font to render the unicode code-point correctly.
+        children![(Text::new(label), TextColor(Color::WHITE), font)],
     )
 }
 
@@ -70,15 +67,32 @@ fn overlay(
             DespawnOnExit(state),
         ))
         .with_children(|root| {
-            for &(line, size) in lines {
-                root.spawn((
-                    Text::new(line),
-                    TextColor(Color::WHITE),
-                    TextLayout::justify(Justify::Center),
-                    font(asset_server, size),
-                ));
-            }
-            root.spawn(start_button(button_label, font(asset_server, 24.0)));
+            // A panel behind the text keeps it readable over whatever is on the table.
+            root.spawn((
+                Node {
+                    max_width: Val::Px(760.0),
+                    align_items: AlignItems::Center,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(12.0),
+                    padding: UiRect::all(Val::Px(24.0)),
+                    border_radius: BorderRadius::all(Val::Px(16.0)),
+                    ..default()
+                },
+                // Blending happens in linear color, so it takes a high alpha to dim white cards
+                // enough for white text to stand out.
+                BackgroundColor(Color::BLACK.with_alpha(0.85)),
+            ))
+            .with_children(|panel| {
+                for &(line, size) in lines {
+                    panel.spawn((
+                        Text::new(line),
+                        TextColor(Color::WHITE),
+                        TextLayout::justify(Justify::Center),
+                        font(asset_server, size),
+                    ));
+                }
+                panel.spawn(start_button(button_label, font(asset_server, 24.0)));
+            });
         });
 }
 

@@ -1,11 +1,14 @@
 //! The heads-up display: move count, game clock, and the Undo and New Game buttons.
-use bevy::prelude::*;
+use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
-    menu::{button, font, start_button},
+    menu::{StartButton, button_node, font},
     state::GameState,
     table::Table,
 };
+
+/// Windows narrower than this (in logical pixels) show only icons on the HUD's buttons.
+const NARROW_HUD_PX: f32 = 560.0;
 
 /// When the current game's clock started and stopped, in seconds since the app started.
 ///
@@ -59,6 +62,38 @@ fn on_undo_button(
 #[derive(Component)]
 struct MovesText;
 
+/// A button label that shrinks to just its icon on narrow windows.
+#[derive(Component)]
+struct ResponsiveLabel {
+    icon: &'static str,
+    words: &'static str,
+}
+
+impl ResponsiveLabel {
+    fn text(&self, narrow: bool) -> String {
+        if narrow {
+            self.icon.to_string()
+        } else {
+            format!("{} {}", self.icon, self.words)
+        }
+    }
+}
+
+/// A HUD button with a [`ResponsiveLabel`], tagged with `marker`.
+fn hud_button(label: ResponsiveLabel, font: TextFont, marker: impl Bundle) -> impl Bundle {
+    (
+        button_node(UiRect::axes(Val::Px(10.0), Val::Px(6.0))),
+        marker,
+        children![(
+            Text::new(label.text(false)),
+            TextColor(Color::WHITE),
+            TextLayout::no_wrap(),
+            font,
+            label,
+        )],
+    )
+}
+
 #[derive(Component)]
 struct ClockText;
 
@@ -72,14 +107,14 @@ impl Plugin for HudPlugin {
             .add_systems(Startup, spawn_hud)
             .add_systems(OnEnter(GameState::Deal), reset_clock)
             .add_systems(OnEnter(GameState::Win), stop_clock)
-            .add_systems(Update, (start_clock, update_hud).chain());
+            .add_systems(Update, (start_clock, update_hud).chain())
+            .add_systems(Update, fit_labels);
     }
 }
 
 fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
     let text_font = font(&asset_server, 20.0);
     let button_font = font(&asset_server, 18.0);
-    let padding = UiRect::axes(Val::Px(10.0), Val::Px(6.0));
     commands.spawn((
         Node {
             width: Val::Percent(100.0),
@@ -99,6 +134,7 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                     (
                         Text::new("Moves 0"),
                         TextColor(Color::WHITE),
+                        TextLayout::no_wrap(),
                         text_font.clone(),
                         MovesText
                     ),
@@ -106,6 +142,7 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                         // embedded the FontAwesome clock icon via unicode code-point
                         Text::new("\u{F017} 0:00"),
                         TextColor(Color::WHITE),
+                        TextLayout::no_wrap(),
                         text_font,
                         ClockText
                     ),
@@ -117,13 +154,41 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                     ..default()
                 },
                 children![
-                    // embedded the FontAwesome undo icon via unicode code-point
-                    button("\u{F0E2} Undo", button_font.clone(), padding, UndoButton),
-                    start_button("\u{F0453} New Game", button_font),
+                    hud_button(
+                        // embedded the FontAwesome undo icon via unicode code-point
+                        ResponsiveLabel {
+                            icon: "\u{F0E2}",
+                            words: "Undo"
+                        },
+                        button_font.clone(),
+                        UndoButton
+                    ),
+                    hud_button(
+                        ResponsiveLabel {
+                            icon: "\u{F0453}",
+                            words: "New Game"
+                        },
+                        button_font,
+                        StartButton
+                    ),
                 ],
             ),
         ],
     ));
+}
+
+/// Shortens the button labels on narrow windows, so the HUD fits on one line.
+fn fit_labels(
+    window: Single<&Window, (With<PrimaryWindow>, Changed<Window>)>,
+    mut labels: Query<(&ResponsiveLabel, &mut Text)>,
+) {
+    let narrow = window.width() < NARROW_HUD_PX;
+    for (label, mut text) in &mut labels {
+        let wanted = label.text(narrow);
+        if text.0 != wanted {
+            text.0 = wanted;
+        }
+    }
 }
 
 fn reset_clock(mut clock: ResMut<GameClock>) {
