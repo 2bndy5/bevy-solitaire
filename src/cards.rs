@@ -18,6 +18,12 @@ impl Card {
         Self { rank, suit }
     }
 
+    /// The card's image file name without its extension, as used by every deck: its rank's
+    /// number and its suit's initial, e.g. `12h` for the Queen of Hearts.
+    pub fn file_stem(&self) -> String {
+        format!("{}{}", self.rank.as_u8(), self.suit.short_name())
+    }
+
     /// Path (relative to the `assets` folder) of this card's face image.
     pub fn face_resource_name(&self) -> String {
         format!(
