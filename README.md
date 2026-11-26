@@ -14,7 +14,9 @@ It grew out of [bevy-52-card-pickup], reusing its free
 - Click the stock (top left) to draw a card. When the stock is empty, click it to turn the waste
   pile back over.
 - Drag a card (and any cards on top of it) to move it.
-- Double-click a card to send it to a foundation.
+- Click (or tap) a card to move it, and any cards on top of it, to the first place it fits: a
+  foundation if it can go there, otherwise the next tableau column (to the right, wrapping around)
+  that takes it. Click again to move it on to the next option.
 - Press "Undo" (or Ctrl+Z, Cmd+Z or U) to take back moves, one at a time.
 - Once the stock is empty and every tableau card is face up, the game finishes itself.
 - The clock starts on your first move.

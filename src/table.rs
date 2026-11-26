@@ -18,8 +18,8 @@ use crate::{
 const GLIDE_SPEED: f32 = 14.0;
 /// How quickly cards turn over (higher is faster).
 const FLIP_SPEED: f32 = 12.0;
-/// Two presses on the same card within this many seconds count as a double-click.
-const DOUBLE_CLICK_SECS: f64 = 0.4;
+/// A press that moves less than this (in logical pixels) before release is a tap, not a drag.
+const TAP_SLOP_PX: f32 = 10.0;
 /// Height of the bottom card of a pile above the felt.
 pub const REST_HEIGHT: f32 = 0.5;
 /// Height between cards stacked in a pile.
@@ -99,12 +99,15 @@ struct Drag {
     grab_offset: Vec2,
     /// Last known pointer position, on the drag plane, in table coordinates.
     pointer: Vec2,
+    /// Where the press started, in window coordinates.
+    press_position: Vec2,
+    /// Whether the pointer has moved far enough for this to be a drag rather than a tap.
+    moved: bool,
 }
 
 #[derive(Resource, Default)]
 struct PointerState {
     drag: Option<Drag>,
-    last_press: Option<(Card, f64)>,
 }
 
 impl PointerState {
@@ -288,18 +291,20 @@ fn read_pointer(
     }
     if let Some(touch) = touches.iter_just_released().next() {
         released = Some(touch.position());
+        // The touch is gone from `touches.iter()` now; where it lifted is its last position.
+        // (The mouse cursor may be somewhere else entirely on a touch screen.)
+        current = released;
     }
     (pressed, released, current)
 }
 
-/// Handles clicking the stock, double-clicking cards, and dragging cards between piles.
+/// Handles clicking the stock, tapping cards to move them, and dragging cards between piles.
 #[allow(clippy::too_many_arguments)]
 fn pointer_input(
     window: Single<&Window, With<PrimaryWindow>>,
     camera: Single<(&Camera, &GlobalTransform), With<TableCamera>>,
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
-    time: Res<Time>,
     entities: Res<CardEntities>,
     layout: Res<Layout>,
     mut table: ResMut<Table>,
@@ -325,23 +330,15 @@ fn pointer_input(
                 table.0.draw();
             }
             Some((pile, Some(index))) if game.can_pick_up(pile, index) => {
-                let card = game.pile(pile)[index].card;
-                let now = time.elapsed_secs_f64();
-                let is_top = index + 1 == game.pile(pile).len();
-                let double_click = pointer
-                    .last_press
-                    .is_some_and(|(last, at)| last == card && now - at < DOUBLE_CLICK_SECS);
-                if double_click && is_top && table.0.move_to_foundation(pile) {
-                    pointer.last_press = None;
-                } else if let Some(drag_point) = on_plane(pos, DRAG_HEIGHT) {
-                    pointer.last_press = Some((card, now));
-                    let game = &table.0;
+                if let Some(drag_point) = on_plane(pos, DRAG_HEIGHT) {
                     pointer.drag = Some(Drag {
                         from: pile,
                         index,
                         cards: game.pile(pile)[index..].iter().map(|s| s.card).collect(),
                         grab_offset: layout.card_position(game, pile, index) - drag_point,
                         pointer: drag_point,
+                        press_position: pos,
+                        moved: false,
                     });
                 }
             }
@@ -352,11 +349,15 @@ fn pointer_input(
     let Some(drag) = pointer.drag.as_mut() else {
         return;
     };
-    if let Some(point) = current.and_then(|pos| on_plane(pos, DRAG_HEIGHT)) {
-        drag.pointer = point;
+    if let Some(pos) = current {
+        drag.moved |= pos.distance(drag.press_position) > TAP_SLOP_PX;
+        if let Some(point) = on_plane(pos, DRAG_HEIGHT) {
+            drag.pointer = point;
+        }
     }
     let lead = drag.pointer + drag.grab_offset;
-    for (i, card) in drag.cards.iter().enumerate() {
+    // Cards only lift once the pointer moves, so a tap doesn't make them jump.
+    for (i, card) in drag.cards.iter().enumerate().filter(|_| drag.moved) {
         if let Ok((mut transform, mut view)) = cards.get_mut(entities.0[card]) {
             let offset = Vec2::new(0.0, i as f32 * layout.face_up_offset);
             let height = DRAG_HEIGHT + i as f32 * CARD_GAP;
@@ -368,7 +369,10 @@ fn pointer_input(
     if released.is_some() || !(mouse.pressed(MouseButton::Left) || touches.iter().next().is_some())
     {
         let drag = pointer.drag.take().expect("checked above");
-        if let Some(to) = layout.drop_target(&table.0, lead) {
+        if !drag.moved {
+            // A tap: send the cards to the best place for them, if there is one.
+            table.0.auto_move(drag.from, drag.index);
+        } else if let Some(to) = layout.drop_target(&table.0, lead) {
             table.0.try_move(drag.from, drag.index, to);
         }
         // Even if the move failed, the cards must glide back to their piles.

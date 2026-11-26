@@ -108,7 +108,7 @@ pub fn hello_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
             (
                 "Build each foundation up by suit from Ace to King.\n\
                  Drag cards to move them; build the tableau down in alternating colors.\n\
-                 Click the stock to draw. Double-click a card to send it to a foundation.",
+                 Click the stock to draw. Click a card to move it to the first place it fits.",
                 20.0,
             ),
         ],
