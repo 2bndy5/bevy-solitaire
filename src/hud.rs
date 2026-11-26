@@ -3,6 +3,7 @@ use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
     menu::{StartButton, button_node, font},
+    settings::SettingsButton,
     state::GameState,
     table::Table,
 };
@@ -71,7 +72,7 @@ struct ResponsiveLabel {
 
 impl ResponsiveLabel {
     fn text(&self, narrow: bool) -> String {
-        if narrow {
+        if narrow || self.words.is_empty() {
             self.icon.to_string()
         } else {
             format!("{} {}", self.icon, self.words)
@@ -154,6 +155,15 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                     ..default()
                 },
                 children![
+                    hud_button(
+                        // embedded the FontAwesome cog icon via unicode code-point
+                        ResponsiveLabel {
+                            icon: "\u{F013}",
+                            words: ""
+                        },
+                        button_font.clone(),
+                        SettingsButton
+                    ),
                     hud_button(
                         // embedded the FontAwesome undo icon via unicode code-point
                         ResponsiveLabel {

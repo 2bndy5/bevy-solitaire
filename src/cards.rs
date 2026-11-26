@@ -28,11 +28,6 @@ impl Card {
         )
     }
 
-    /// Path (relative to the `assets` folder) of the card back image.
-    pub fn back_resource_name() -> &'static str {
-        "images/Back Blue.png"
-    }
-
     pub fn is_red(&self) -> bool {
         self.suit.is_red()
     }

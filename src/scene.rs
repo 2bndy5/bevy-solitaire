@@ -9,19 +9,10 @@ use bevy::{
     light::CascadeShadowConfigBuilder, prelude::*, render::view::Tonemapping, window::PrimaryWindow,
 };
 
-use crate::{layout::Layout, state::GameState};
+use crate::{layout::Layout, settings::Settings, state::GameState};
 
-/// The color of the felt on the card table.
-pub const FELT: Color = Color::srgb(0.11, 0.42, 0.23);
 /// The camera's vertical field of view. Narrow, to keep perspective distortion gentle.
 const CAMERA_FOV: f32 = FRAC_PI_6;
-/// Brightness of the light shining on the table.
-///
-/// Chosen with the camera's default exposure so a white card face lit by both lights comes out at
-/// about full white, without tone mapping washing the colors out.
-const SUN_LUX: f32 = 2200.0;
-/// Brightness of the ambient light, which keeps shadows from going black.
-const AMBIENT_BRIGHTNESS: f32 = 300.0;
 
 /// Converts a table point at `height` above the felt to a world position.
 pub fn to_world(point: Vec2, height: f32) -> Vec3 {
@@ -37,16 +28,16 @@ pub fn to_table(world: Vec3) -> Vec2 {
 #[derive(Component)]
 pub struct TableCamera;
 
+/// The felt's material, recolored when the table color setting changes.
+#[derive(Resource)]
+struct Felt(Handle<StandardMaterial>);
+
 pub struct ScenePlugin;
 
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ClearColor(FELT))
-            .insert_resource(GlobalAmbientLight {
-                brightness: AMBIENT_BRIGHTNESS,
-                ..default()
-            })
-            .add_systems(Startup, setup_scene)
+        app.add_systems(Startup, setup_scene)
+            .add_systems(Update, apply_settings)
             .init_resource::<Layout>()
             .add_systems(Update, fit_to_window);
     }
@@ -70,14 +61,9 @@ fn setup_scene(
         // Show the card art's colors as they are.
         Tonemapping::None,
     ));
+    // Colors, brightness and direction come from the settings. See `apply_settings`.
     commands.spawn((
-        DirectionalLight {
-            illuminance: SUN_LUX,
-            shadow_maps_enabled: true,
-            ..default()
-        },
-        // Light from above, slightly from the top left, so cards cast short shadows.
-        Transform::from_xyz(-250.0, 1000.0, -350.0).looking_at(Vec3::ZERO, Vec3::Y),
+        DirectionalLight::default(),
         CascadeShadowConfigBuilder {
             num_cascades: 1,
             maximum_distance: 4000.0,
@@ -86,15 +72,50 @@ fn setup_scene(
         .build(),
     ));
     // The felt extends well past the screen edges, so no background shows around it.
+    let felt = materials.add(StandardMaterial {
+        perceptual_roughness: 1.0,
+        ..default()
+    });
+    commands.insert_resource(Felt(felt.clone()));
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(4000.0)))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: FELT,
-            perceptual_roughness: 1.0,
-            ..default()
-        })),
+        MeshMaterial3d(felt),
     ));
     game_state.set(GameState::Menu);
+}
+
+/// Applies the table color and lighting settings.
+fn apply_settings(
+    mut commands: Commands,
+    settings: Res<Settings>,
+    felt: Option<Res<Felt>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut sun: Single<(&mut DirectionalLight, &mut Transform)>,
+) {
+    let Some(felt) = felt else {
+        return;
+    };
+    if !settings.is_changed() && !felt.is_added() {
+        return;
+    }
+    let felt_color = settings.table.felt();
+    if let Some(mut material) = materials.get_mut(&felt.0) {
+        material.base_color = felt_color;
+    }
+    commands.insert_resource(ClearColor(felt_color));
+
+    let rig = settings.lighting.rig();
+    let (light, transform) = &mut *sun;
+    light.color = rig.sun_color;
+    light.illuminance = rig.sun_lux;
+    light.shadow_maps_enabled = rig.shadows;
+    // Lights pointing straight down need a different "up" than Y.
+    **transform = Transform::from_translation(rig.sun_position).looking_at(Vec3::ZERO, Vec3::NEG_Z);
+    commands.insert_resource(GlobalAmbientLight {
+        color: rig.ambient_color,
+        brightness: rig.ambient_brightness,
+        ..default()
+    });
 }
 
 /// The camera's transform when it is `distance` away from the table's center, leaning back by
