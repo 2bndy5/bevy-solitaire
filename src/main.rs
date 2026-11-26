@@ -1,17 +1,21 @@
 use bevy::prelude::*;
 
 mod cards;
+mod celebrate;
 mod game;
+mod hud;
 mod layout;
 mod menu;
 mod scene;
 mod state;
 mod table;
 
-use menu::{button_detector, hello_menu, win_menu};
+use celebrate::CelebratePlugin;
+use hud::HudPlugin;
+use menu::{hello_menu, on_start_button};
 use scene::ScenePlugin;
 use state::GameState;
-use table::{TablePlugin, spawn_hud};
+use table::TablePlugin;
 
 fn main() {
     App::new()
@@ -24,13 +28,8 @@ fn main() {
             ..default()
         }))
         .init_state::<GameState>()
-        .add_plugins((ScenePlugin, TablePlugin))
-        .add_systems(Startup, spawn_hud)
+        .add_plugins((ScenePlugin, TablePlugin, HudPlugin, CelebratePlugin))
         .add_systems(OnEnter(GameState::Menu), hello_menu)
-        .add_systems(OnEnter(GameState::Win), win_menu)
-        .add_systems(
-            Update,
-            button_detector.run_if(not(in_state(GameState::Loading))),
-        )
+        .add_observer(on_start_button)
         .run();
 }

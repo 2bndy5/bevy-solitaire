@@ -1,10 +1,10 @@
 //! Start and win screens, adapted from `bevy-52-card-pickup`.
-use crate::{state::GameState, table::Table};
-use bevy::{prelude::*, ui::Pressed, ui_widgets::Button};
+use crate::state::GameState;
+use bevy::{prelude::*, ui_widgets::Button};
 
 const FONT_PATH: &str = "fonts/UbuntuNerdFont-Medium.ttf";
 
-fn font(asset_server: &AssetServer, size: f32) -> TextFont {
+pub fn font(asset_server: &AssetServer, size: f32) -> TextFont {
     TextFont {
         font: FontSource::Handle(asset_server.load(FONT_PATH)),
         font_size: FontSize::Px(size),
@@ -12,16 +12,29 @@ fn font(asset_server: &AssetServer, size: f32) -> TextFont {
     }
 }
 
-/// A button that (re)starts the game when pressed. See [`button_detector`].
-pub fn start_button(label: &str, font: TextFont) -> impl Bundle {
+/// Marks buttons that (re)start the game when pressed. See [`on_start_button`].
+#[derive(Component)]
+pub struct StartButton;
+
+/// The look of a button: a rounded, green box.
+pub fn button_node(padding: UiRect) -> impl Bundle {
     (
         Button,
         Node {
-            padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
+            padding,
             border_radius: BorderRadius::all(Val::Px(8.0)),
+            align_items: AlignItems::Center,
             ..default()
         },
         BackgroundColor(Color::srgb(0.125, 0.6, 0.125)),
+    )
+}
+
+/// A button that (re)starts the game when pressed.
+pub fn start_button(label: &str, font: TextFont) -> impl Bundle {
+    (
+        button_node(UiRect::axes(Val::Px(16.0), Val::Px(8.0))),
+        StartButton,
         // TextFont component (pointing to nerd font asset) must be in same bundle as
         // the Text component for the font to render the unicode code-point correctly.
         children![(Text::new(label), TextColor(Color::WHITE), font)],
@@ -35,6 +48,7 @@ fn overlay(
     state: GameState,
     lines: &[(&str, f32)],
     button_label: &str,
+    dim: f32,
 ) {
     commands
         .spawn((
@@ -48,20 +62,37 @@ fn overlay(
                 padding: UiRect::all(Val::Px(16.0)),
                 ..default()
             },
-            BackgroundColor(Color::BLACK.with_alpha(0.75)),
+            BackgroundColor(Color::BLACK.with_alpha(dim)),
             GlobalZIndex(1),
             DespawnOnExit(state),
         ))
         .with_children(|root| {
-            for &(line, size) in lines {
-                root.spawn((
-                    Text::new(line),
-                    TextColor(Color::WHITE),
-                    TextLayout::justify(Justify::Center),
-                    font(asset_server, size),
-                ));
-            }
-            root.spawn(start_button(button_label, font(asset_server, 24.0)));
+            // A panel behind the text keeps it readable over whatever is on the table.
+            root.spawn((
+                Node {
+                    max_width: Val::Px(760.0),
+                    align_items: AlignItems::Center,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(12.0),
+                    padding: UiRect::all(Val::Px(24.0)),
+                    border_radius: BorderRadius::all(Val::Px(16.0)),
+                    ..default()
+                },
+                // Blending happens in linear color, so it takes a high alpha to dim white cards
+                // enough for white text to stand out.
+                BackgroundColor(Color::BLACK.with_alpha(0.85)),
+            ))
+            .with_children(|panel| {
+                for &(line, size) in lines {
+                    panel.spawn((
+                        Text::new(line),
+                        TextColor(Color::WHITE),
+                        TextLayout::justify(Justify::Center),
+                        font(asset_server, size),
+                    ));
+                }
+                panel.spawn(start_button(button_label, font(asset_server, 24.0)));
+            });
         });
 }
 
@@ -83,31 +114,45 @@ pub fn hello_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
         ],
         // embedded the FontAwesome Play icon (circle variant) via unicode code-point
         "\u{F01D} Start Game",
+        0.75,
     );
 }
 
-/// System that spawns the menu when entering the [`GameState::Win`] state.
-pub fn win_menu(mut commands: Commands, asset_server: Res<AssetServer>, table: Res<Table>) {
-    let moves = format!("You cleared the table in {} moves.", table.0.moves);
+/// Shows the win screen with the game's statistics.
+///
+/// The background is only lightly dimmed, so the celebration stays visible behind it.
+pub fn spawn_win_overlay(
+    commands: &mut Commands,
+    asset_server: &AssetServer,
+    moves: u32,
+    time: &str,
+) {
+    let stats = format!("You cleared the table in {moves} moves and {time}.");
     overlay(
-        &mut commands,
-        &asset_server,
+        commands,
+        asset_server,
         GameState::Win,
         &[
             // embedded the Octicons rocket icon via unicode code-point
             ("Congratulations! \u{f427}", 40.0),
-            (&moves, 28.0),
+            (&stats, 28.0),
         ],
         "\u{F01D} Play Again",
+        0.45,
     );
 }
 
 /// Starts a new deal whenever a start button is pressed.
-pub fn button_detector(
-    query: Query<&Pressed, (Changed<Pressed>, With<Button>)>,
+///
+/// Buttons act on the pointer's press event, which arrives once per press. (The button widget's
+/// own `Activate` event can be missed when a press and release land in the same frame.)
+pub fn on_start_button(
+    press: On<PointerPress>,
+    start_buttons: Query<(), With<StartButton>>,
+    state: Res<State<GameState>>,
     mut game_state: ResMut<NextState<GameState>>,
 ) {
-    for _ in query {
+    if start_buttons.contains(press.entity) && *state.get() != GameState::Loading {
         info!("Starting a new game");
         game_state.set(GameState::Deal);
     }

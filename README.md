@@ -15,6 +15,9 @@ It grew out of [bevy-52-card-pickup], reusing its free
   pile back over.
 - Drag a card (and any cards on top of it) to move it.
 - Double-click a card to send it to a foundation.
+- Press "Undo" (or Ctrl+Z, Cmd+Z or U) to take back moves, one at a time.
+- Once the stock is empty and every tableau card is face up, the game finishes itself.
+- The clock starts on your first move.
 - Press "New Game" at any time to deal again.
 
 ## Try it
@@ -50,6 +53,8 @@ Run the tests for the game rules with `cargo test`.
 | `src/layout.rs` | Where piles and cards sit on the table, and pointer hit-testing.        |
 | `src/scene.rs`  | The 3D scene: tilted camera, lighting and the felt table.               |
 | `src/table.rs`  | Bevy systems: dealing, card animation, dragging and the HUD.            |
+| `src/hud.rs`    | Move count, game clock, and the Undo and New Game buttons.              |
+| `src/celebrate.rs` | The win celebration.                                                 |
 | `src/menu.rs`   | Start and win screens.                                                  |
 
 [Bevy]: https://bevy.org
