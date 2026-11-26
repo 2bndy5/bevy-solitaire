@@ -1,6 +1,7 @@
 # Bevy Solitaire
 
-A basic game of Klondike solitaire (draw one) made with [Bevy].
+A basic game of Klondike solitaire (draw one) made with [Bevy], played with 3D cards on a gently
+tilted table.
 
 It grew out of [bevy-52-card-pickup], reusing its free
 [asset pack of hand-drawn cards][card-assets-link], card model, menus and build setup.
@@ -47,7 +48,8 @@ Run the tests for the game rules with `cargo test`.
 | `src/cards.rs`  | Cards, ranks, suits and decks.                                          |
 | `src/game.rs`   | Klondike rules, independent of Bevy (unit tested).                      |
 | `src/layout.rs` | Where piles and cards sit on the table, and pointer hit-testing.        |
-| `src/table.rs`  | Bevy systems: dealing, rendering, dragging and the HUD.                 |
+| `src/scene.rs`  | The 3D scene: tilted camera, lighting and the felt table.               |
+| `src/table.rs`  | Bevy systems: dealing, card animation, dragging and the HUD.            |
 | `src/menu.rs`   | Start and win screens.                                                  |
 
 [Bevy]: https://bevy.org
