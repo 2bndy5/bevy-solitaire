@@ -174,8 +174,9 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                         UndoButton
                     ),
                     hud_button(
+                        // embedded the FontAwesome plus icon via unicode code-point
                         ResponsiveLabel {
-                            icon: "\u{F0453}",
+                            icon: "\u{F067}",
                             words: "New Game"
                         },
                         button_font,
