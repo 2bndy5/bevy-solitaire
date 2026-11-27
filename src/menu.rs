@@ -70,6 +70,8 @@ fn overlay(
             // A panel behind the text keeps it readable over whatever is on the table.
             root.spawn((
                 Node {
+                    // Fill narrow screens (wrapping the text) but don't sprawl on wide ones.
+                    width: Val::Percent(100.0),
                     max_width: Val::Px(760.0),
                     align_items: AlignItems::Center,
                     flex_direction: FlexDirection::Column,
@@ -142,6 +144,30 @@ pub fn spawn_win_overlay(
     );
 }
 
+/// Shrinks the whole UI on small screens, so panels fit without scrolling.
+///
+/// The UI is designed for windows at least [`UI_DESIGN_SIZE`] logical pixels big; smaller windows
+/// scale it down to match (but no further than [`MIN_UI_SCALE`], to keep text legible).
+pub fn fit_ui_to_window(
+    window: Single<&Window, (With<bevy::window::PrimaryWindow>, Changed<Window>)>,
+    mut ui_scale: ResMut<UiScale>,
+) {
+    let scale = ui_scale_for(window.size());
+    if ui_scale.0 != scale {
+        ui_scale.0 = scale;
+    }
+}
+
+/// The smallest window (logical pixels) the UI is designed for at full size.
+pub const UI_DESIGN_SIZE: Vec2 = Vec2::new(440.0, 720.0);
+/// The UI never shrinks below this scale.
+pub const MIN_UI_SCALE: f32 = 0.6;
+
+fn ui_scale_for(window: Vec2) -> f32 {
+    let fit = window / UI_DESIGN_SIZE;
+    fit.x.min(fit.y).clamp(MIN_UI_SCALE, 1.0)
+}
+
 /// Starts a new deal whenever a start button is pressed.
 ///
 /// Buttons act on the pointer's press event, which arrives once per press. (The button widget's
@@ -155,5 +181,21 @@ pub fn on_start_button(
     if start_buttons.contains(press.entity) && *state.get() != GameState::Loading {
         info!("Starting a new game");
         game_state.set(GameState::Deal);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_shrinks_only_on_small_windows() {
+        assert_eq!(ui_scale_for(Vec2::new(1280.0, 720.0)), 1.0);
+        assert_eq!(ui_scale_for(Vec2::new(2560.0, 1440.0)), 1.0);
+        // A phone held upright: limited by its width.
+        assert!((ui_scale_for(Vec2::new(360.0, 740.0)) - 360.0 / 440.0).abs() < 1e-6);
+        // A short landscape window: limited by its height.
+        assert!((ui_scale_for(Vec2::new(1474.0, 610.0)) - 610.0 / 720.0).abs() < 1e-6);
+        assert_eq!(ui_scale_for(Vec2::new(100.0, 100.0)), MIN_UI_SCALE);
     }
 }

@@ -7,13 +7,15 @@ mod hud;
 mod layout;
 mod menu;
 mod scene;
+mod settings;
 mod state;
 mod table;
 
 use celebrate::CelebratePlugin;
 use hud::HudPlugin;
-use menu::{hello_menu, on_start_button};
+use menu::{fit_ui_to_window, hello_menu, on_start_button};
 use scene::ScenePlugin;
+use settings::SettingsPlugin;
 use state::GameState;
 use table::TablePlugin;
 
@@ -28,8 +30,15 @@ fn main() {
             ..default()
         }))
         .init_state::<GameState>()
-        .add_plugins((ScenePlugin, TablePlugin, HudPlugin, CelebratePlugin))
+        .add_plugins((
+            SettingsPlugin,
+            ScenePlugin,
+            TablePlugin,
+            HudPlugin,
+            CelebratePlugin,
+        ))
         .add_systems(OnEnter(GameState::Menu), hello_menu)
         .add_observer(on_start_button)
+        .add_systems(Update, fit_ui_to_window)
         .run();
 }

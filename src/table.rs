@@ -11,6 +11,7 @@ use crate::{
     hud::UndoRequested,
     layout::{HUD_HEIGHT_PX, Layout},
     scene::{TableCamera, pointer_on_plane, to_table, to_world},
+    settings::{Settings, SettingsPanel},
     state::GameState,
 };
 
@@ -126,11 +127,17 @@ impl Plugin for TablePlugin {
             .init_resource::<AutoFinish>()
             .init_resource::<AnimationSpeed>()
             .add_systems(Startup, (load_card_assets, spawn_slots).chain())
-            .add_systems(Update, place_outlines)
+            .add_systems(Update, (place_outlines, apply_settings))
             .add_systems(OnEnter(GameState::Deal), (deal, reset_auto_finish))
             .add_systems(
                 Update,
-                (pointer_input, undo_input, auto_finish, check_win)
+                (
+                    // The table ignores the pointer while the settings panel is open.
+                    pointer_input.run_if(in_state(SettingsPanel::Closed)),
+                    undo_input,
+                    auto_finish,
+                    check_win,
+                )
                     .chain()
                     .run_if(in_state(GameState::Play)),
             )
@@ -154,6 +161,7 @@ pub fn card_rotation(face_up: bool) -> Quat {
 
 fn load_card_assets(
     mut commands: Commands,
+    settings: Res<Settings>,
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -166,21 +174,44 @@ fn load_card_assets(
             ..default()
         })
     };
-    let back = card_material(Card::back_resource_name().to_string());
+    let back = card_material(settings.back.path().to_string());
     let faces = new_deck()
         .into_iter()
-        .map(|card| (card, card_material(card.face_resource_name())))
+        .map(|card| (card, card_material(settings.deck.face_path(card))))
         .collect();
     commands.insert_resource(CardAssets {
         mesh: meshes.add(Rectangle::new(CARD_W, CARD_H)),
         back,
         faces,
         slot: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.24, 0.52, 0.34),
+            base_color: settings.table.outline(),
             perceptual_roughness: 1.0,
             ..default()
         }),
     });
+}
+
+/// Swaps in the chosen card art and outline color when the settings change.
+fn apply_settings(
+    settings: Res<Settings>,
+    assets: Res<CardAssets>,
+    asset_server: Res<AssetServer>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if !settings.is_changed() || settings.is_added() {
+        return;
+    }
+    if let Some(mut back) = materials.get_mut(&assets.back) {
+        back.base_color_texture = Some(asset_server.load(settings.back.path()));
+    }
+    for (&card, face) in &assets.faces {
+        if let Some(mut face) = materials.get_mut(face) {
+            face.base_color_texture = Some(asset_server.load(settings.deck.face_path(card)));
+        }
+    }
+    if let Some(mut slot) = materials.get_mut(&assets.slot) {
+        slot.base_color = settings.table.outline();
+    }
 }
 
 /// Marks the outline showing where a pile goes.

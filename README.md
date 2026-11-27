@@ -21,6 +21,9 @@ It grew out of [bevy-52-card-pickup], reusing its free
 - Once the stock is empty and every tableau card is face up, the game finishes itself.
 - The clock starts on your first move.
 - Press "New Game" at any time to deal again.
+- Press the cog to choose the card art, table color and lighting. Your choices are remembered
+  (in the browser's local storage on the web, or a `bevy-solitaire/settings.txt` file in your
+  config folder on desktop).
 
 ## Try it
 
@@ -58,6 +61,7 @@ Run the tests for the game rules with `cargo test`.
 | `src/hud.rs`    | Move count, game clock, and the Undo and New Game buttons.              |
 | `src/celebrate.rs` | The win celebration.                                                 |
 | `src/menu.rs`   | Start and win screens.                                                  |
+| `src/settings.rs` | Settings (card art, table color, lighting), saving them, and their panel. |
 
 [Bevy]: https://bevy.org
 [bevy-52-card-pickup]: https://github.com/2bndy5/bevy-52-card-pickup
