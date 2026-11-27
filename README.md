@@ -1,7 +1,8 @@
 # Bevy Solitaire
 
 A collection of solitaire games made with [Bevy], played with 3D cards on a gently tilted table.
-So far it has Klondike (draw one), FreeCell, Golf, TriPeaks and Pyramid; Spider is on the way.
+It has Klondike (draw one), FreeCell, Golf, TriPeaks, Pyramid and Spider (with one, two or four
+suits).
 
 It grew out of [bevy-52-card-pickup], reusing its free
 [asset pack of hand-drawn cards][card-assets-link], card model, menus and build setup.
@@ -81,6 +82,21 @@ the source code and ways to support the project.
 - Tap the stock to turn its next card onto the waste; once it's empty, tap it again to turn the
   waste back over.
 - Clear the pyramid to win.
+
+### Spider
+
+- Played with 104 cards (two decks' worth) in one, two or four suits; fewer suits is easier. Each
+  suit count has its own saved game and best times.
+- Ten columns: the first four get six cards, the rest five, with only the top card face up. The
+  other 50 cards form the stock.
+- Any card goes on a card one rank higher, whatever its suit; any card goes in an empty column.
+- Only runs of one suit, going down a rank at a time, can be moved together.
+- A complete run from King to Ace in one suit leaves the table for a foundation (top left).
+- Tap the stock (top right) to deal a face-up card onto every column. As in the classic game, you
+  can't deal while a column is empty.
+- Tap a run to move it onto the next column with a card one rank higher, preferring one of the same
+  suit; failing that, into an empty column.
+- Clear all eight runs to win.
 
 Your settings and saved games are kept in the browser's local storage on the web, or in a
 `bevy-solitaire` folder in your config folder on desktop.

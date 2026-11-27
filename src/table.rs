@@ -343,7 +343,7 @@ fn deal(
                     children![
                         (
                             Mesh3d(assets.mesh.clone()),
-                            MeshMaterial3d(assets.faces[&card].clone()),
+                            MeshMaterial3d(assets.faces[&card.face()].clone()),
                             Transform::from_xyz(0.0, 0.0, FACE_SEPARATION),
                         ),
                         (

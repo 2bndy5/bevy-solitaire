@@ -11,11 +11,46 @@ pub const CARD_H: f32 = 120.0;
 pub struct Card {
     pub rank: Rank,
     pub suit: Suit,
+    /// Which copy of this rank and suit the card is, for games played with more than one deck
+    /// (Spider). 0 for the first (or only) copy.
+    pub copy: u8,
 }
 
 impl Card {
     pub const fn new(rank: Rank, suit: Suit) -> Self {
-        Self { rank, suit }
+        Self {
+            rank,
+            suit,
+            copy: 0,
+        }
+    }
+
+    /// Copy number `copy` of this card's rank and suit.
+    pub const fn with_copy(self, copy: u8) -> Self {
+        Self { copy, ..self }
+    }
+
+    /// The card as its first copy: what its face looks like.
+    pub const fn face(self) -> Self {
+        self.with_copy(0)
+    }
+
+    /// A name for this exact card, used in saved games: its [file stem](Card::file_stem),
+    /// followed by `.` and its copy number for copies after the first (e.g. `12h.1`).
+    pub fn key(&self) -> String {
+        match self.copy {
+            0 => self.file_stem(),
+            copy => format!("{}.{copy}", self.file_stem()),
+        }
+    }
+
+    /// Reads a name written by [`Card::key`].
+    pub fn from_key(key: &str) -> Option<Self> {
+        let (stem, copy) = match key.split_once('.') {
+            Some((stem, copy)) => (stem, copy.parse().ok().filter(|&copy| copy > 0)?),
+            None => (key, 0),
+        };
+        Some(Self::from_file_stem(stem)?.with_copy(copy))
     }
 
     /// The card's image file name without its extension, as used by every deck: its rank's
@@ -175,6 +210,20 @@ mod tests {
         let unique: std::collections::HashSet<_> = deck.iter().collect();
         assert_eq!(deck.len(), 52);
         assert_eq!(unique.len(), 52);
+    }
+
+    #[test]
+    fn keys_round_trip() {
+        for card in new_deck() {
+            assert_eq!(Card::from_key(&card.key()), Some(card));
+            let copy = card.with_copy(3);
+            assert_eq!(copy.key(), format!("{}.3", card.file_stem()));
+            assert_eq!(Card::from_key(&copy.key()), Some(copy));
+            assert_eq!(copy.face(), card);
+        }
+        for bad in ["12h.", "12h.0", "12h.x", ".1", "12h.1.2"] {
+            assert_eq!(Card::from_key(bad), None, "{bad}");
+        }
     }
 
     #[test]

@@ -434,7 +434,7 @@ impl Game {
     /// The game as text, for saving. See [`Game::from_text`].
     ///
     /// One `key=value` line each for the game, the move count and every pile. A pile's cards are
-    /// listed bottom first, each as its [file stem](Card::file_stem) followed by `+` if it is
+    /// listed bottom first, each as its [key](Card::key) followed by `+` if it is
     /// face up or `-` if face down.
     pub fn to_text(&self) -> String {
         let mut text = format!("game={}\nmoves={}\n", self.kind.key(), self.moves);
@@ -444,7 +444,7 @@ impl Game {
                 .iter()
                 .map(|slot| {
                     let side = if slot.face_up { '+' } else { '-' };
-                    format!("{}{side}", slot.card.file_stem())
+                    format!("{}{side}", slot.card.key())
                 })
                 .collect();
             text.push_str(&format!("pile.{}={}\n", pile.key(), cards.join(" ")));
@@ -472,7 +472,7 @@ impl Game {
                     .split_whitespace()
                     .map(|word| {
                         let (stem, side) = word.split_at_checked(word.len().checked_sub(1)?)?;
-                        let card = Card::from_file_stem(stem)?;
+                        let card = Card::from_key(stem)?;
                         match side {
                             "+" => Some(Slot::up(card)),
                             "-" => Some(Slot::down(card)),
@@ -526,7 +526,7 @@ pub fn card(rank: Rank, suit: crate::cards::Suit) -> Card {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cards::{Suit, new_deck, shuffle_deck};
+    use crate::cards::{Suit, new_deck, shuffled};
 
     #[test]
     fn adjacent_ranks() {
@@ -578,7 +578,7 @@ mod tests {
     #[test]
     fn saved_games_round_trip() {
         for kind in GameKind::ALL {
-            let mut game = Game::deal(kind, shuffle_deck());
+            let mut game = Game::deal(kind, shuffled(kind.rules().deck()));
             game.draw();
             let restored = Game::from_text(&game.to_text()).expect("a valid save");
             assert_eq!(restored.kind, kind);
