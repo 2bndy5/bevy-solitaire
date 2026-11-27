@@ -17,8 +17,10 @@ Pick a game from the main menu. Your last game of each kind is saved as you play
 game again carries on where you left off (the menu shows its moves and time). Press the house
 button in the top bar to return to the main menu at any time.
 
-Until your first move, a banner at the bottom sums up the game's rules. In games that can get stuck
-(like Golf), it tells you when no moves are left.
+Press the question mark button in the top bar for how to play the current game; it also pops up
+the first time you play each game. In games that can get stuck (like Golf), a banner at the bottom
+tells you when no moves are left. Spider's tile on the main menu opens a choice of one, two or four
+suits.
 
 Winning a game shows your five best times for that game; the main menu's "Best Times" button shows
 them for every game, with how many games you've won. "About" has the version, credits, a link to

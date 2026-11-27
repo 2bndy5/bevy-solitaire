@@ -116,6 +116,13 @@ fn hud_button(label: ResponsiveLabel, font: TextFont, marker: impl Bundle) -> im
 #[derive(Component)]
 struct ClockText;
 
+/// The moves and time texts.
+type StatsText = Or<(With<MovesText>, With<ClockText>)>;
+
+/// Holds the moves and time.
+#[derive(Component)]
+struct StatsBox;
+
 /// The banner along the bottom of the screen.
 #[derive(Component)]
 struct Banner;
@@ -123,16 +130,10 @@ struct Banner;
 #[derive(Component)]
 struct BannerText;
 
-/// What the banner should say about `game`, if anything: the game's rules until the first move,
-/// and that it's stuck when it is.
+/// What the banner should say about `game`, if anything: that it's stuck, when it is.
 fn banner_message(game: &Game) -> Option<String> {
-    if game.is_lost() {
-        Some("No moves left. Undo, or start a new game.".to_string())
-    } else if game.moves == 0 {
-        Some(format!("{}: {}", game.kind.name(), game.kind.summary()))
-    } else {
-        None
-    }
+    game.is_lost()
+        .then(|| "No moves left. Undo, or start a new game.".to_string())
 }
 
 pub struct HudPlugin;
@@ -196,10 +197,13 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
         },
         children![
             (
+                // Moves and time: side by side, or one above the other on narrow windows (see
+                // `fit_labels`).
                 Node {
                     column_gap: Val::Px(14.0),
                     ..default()
                 },
+                StatsBox,
                 children![
                     (
                         Text::new("Moves 0"),
@@ -232,6 +236,15 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                         },
                         button_font.clone(),
                         MenuAction::Home
+                    ),
+                    hud_button(
+                        // embedded the FontAwesome question icon via unicode code-point
+                        ResponsiveLabel {
+                            icon: "\u{F128}",
+                            words: ""
+                        },
+                        button_font.clone(),
+                        MenuAction::HowToPlay
                     ),
                     hud_button(
                         // embedded the FontAwesome cog icon via unicode code-point
@@ -270,12 +283,29 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
 fn fit_labels(
     window: Single<&Window, (With<PrimaryWindow>, Changed<Window>)>,
     mut labels: Query<(&ResponsiveLabel, &mut Text)>,
+    mut stats_box: Single<&mut Node, With<StatsBox>>,
+    mut stats_fonts: Query<&mut TextFont, StatsText>,
 ) {
     let narrow = window.width() < NARROW_HUD_PX;
     for (label, mut text) in &mut labels {
         let wanted = label.text(narrow);
         if text.0 != wanted {
             text.0 = wanted;
+        }
+    }
+    // Stack the moves and time on narrow windows, to leave room for the buttons.
+    let direction = if narrow {
+        FlexDirection::Column
+    } else {
+        FlexDirection::Row
+    };
+    if stats_box.flex_direction != direction {
+        stats_box.flex_direction = direction;
+    }
+    let size = FontSize::Px(if narrow { 15.0 } else { 20.0 });
+    for mut font in &mut stats_fonts {
+        if font.font_size != size {
+            font.font_size = size;
         }
     }
 }
@@ -340,15 +370,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn banner_explains_then_warns() {
+    fn banner_warns_only_when_stuck() {
         use crate::{
             cards::{Card, Rank, Suit, new_deck},
             game::{Board, Pile, Slot},
             games::GameKind,
         };
-        let mut game = Game::deal(GameKind::Golf, new_deck());
-        assert!(banner_message(&game).unwrap().starts_with("Golf: "));
-        assert!(game.draw());
+        let game = Game::deal(GameKind::Golf, new_deck());
         assert_eq!(banner_message(&game), None);
 
         // A Nine with nothing left to draw and a Five on the waste: stuck.

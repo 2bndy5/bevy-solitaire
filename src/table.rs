@@ -11,6 +11,7 @@ use crate::{
     games::GameKind,
     hud::{GameClock, UndoRequested},
     layout::{HUD_HEIGHT_PX, Layout},
+    menu::Popup,
     progress,
     scene::{TableCamera, pointer_on_plane, to_table, to_world},
     settings::{Settings, SettingsPanel},
@@ -166,8 +167,10 @@ impl Plugin for TablePlugin {
             .add_systems(
                 Update,
                 (
-                    // The table ignores the pointer while the settings panel is open.
-                    pointer_input.run_if(in_state(SettingsPanel::Closed)),
+                    // The table ignores the pointer while the settings panel or a pop-up is open.
+                    pointer_input
+                        .run_if(in_state(SettingsPanel::Closed))
+                        .run_if(in_state(Popup::Closed)),
                     undo_input,
                     auto_finish,
                     check_win,

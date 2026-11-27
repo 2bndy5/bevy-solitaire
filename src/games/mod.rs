@@ -92,33 +92,96 @@ impl GameKind {
         }
     }
 
-    /// A one-line summary of how the game is played.
-    pub fn summary(self) -> &'static str {
+    /// How the game is played, one point per line, the goal first.
+    pub fn how_to_play(self) -> &'static [&'static str] {
         match self {
-            GameKind::Klondike => {
-                "Build the foundations up by suit from Ace to King. Build the tableau down in \
-                 alternating colors; draw from the stock one card at a time."
-            }
-            GameKind::FreeCell => {
-                "Every card is dealt face up. Build the tableau down in alternating colors, using \
-                 four free cells to hold single cards."
-            }
-            GameKind::Golf => {
-                "Clear the seven columns: play a top card onto the waste if it is one rank above \
-                 or below the waste's top card. Tap the stock for a new waste card."
-            }
-            GameKind::TriPeaks => {
-                "Clear the three peaks: play an uncovered card onto the waste if it is one rank \
-                 above or below the waste's top card (King and Ace connect)."
-            }
-            GameKind::Pyramid => {
-                "Clear the pyramid: drag an uncovered card onto another (or the waste) to remove \
-                 pairs that add up to 13. Kings go on their own; J = 11, Q = 12."
-            }
+            GameKind::Klondike => &[
+                "Move every card to the four foundations, building each up by suit from Ace to \
+                 King.",
+                "Build the seven columns down in alternating colors. Only a King goes in an empty \
+                 column.",
+                "Tap the stock to draw a card. When it runs out, tap it to turn the waste back \
+                 over.",
+                "Once the stock is empty and every card is face up, the game finishes itself.",
+            ],
+            GameKind::FreeCell => &[
+                "Move every card to the four foundations (top right), building each up by suit \
+                 from Ace to King.",
+                "Every card is dealt face up. Build the columns down in alternating colors; any \
+                 card goes in an empty column.",
+                "Each of the four free cells (top left) holds one card.",
+                "How many cards you can move at once depends on the free cells and empty columns \
+                 there are to shuffle them through.",
+            ],
+            GameKind::Golf => &[
+                "Clear all seven columns onto the waste.",
+                "A column's top card goes on the waste if it is one rank above or below the \
+                 waste's top card, in any suit. Kings and Aces don't connect.",
+                "Tap the stock to turn up a new waste card. You only get one pass through it.",
+            ],
+            GameKind::TriPeaks => &[
+                "Clear all three peaks onto the waste.",
+                "An uncovered card goes on the waste if it is one rank above or below the \
+                 waste's top card, in any suit. Kings and Aces connect.",
+                "Cards turn face up once nothing covers them.",
+                "Tap the stock to turn up a new waste card. You only get one pass through it.",
+            ],
+            GameKind::Pyramid => &[
+                "Clear the pyramid by removing pairs of uncovered cards that add up to 13 \
+                 (Ace = 1, Jack = 11, Queen = 12).",
+                "Drag one card onto its partner to remove both. The top card of the waste counts \
+                 as uncovered.",
+                "Kings are removed on their own: tap them.",
+                "Tap the stock to turn up a new waste card; tap it when empty to turn the waste \
+                 back over.",
+            ],
+            GameKind::Spider1 | GameKind::Spider2 | GameKind::Spider4 => &[
+                "Build runs from King down to Ace in one suit. A complete run leaves the table.",
+                "Any card goes on a card one rank higher, whatever its suit, and any card goes \
+                 in an empty column.",
+                "Only runs of one suit move together.",
+                "Tap the stock to deal a card onto every column (not while a column is empty).",
+            ],
+        }
+    }
+
+    /// The games' entries in the main menu: one tile per game, except that the Spider variants
+    /// share a tile that opens a menu of their own.
+    pub const MENU: [GameKind; 6] = [
+        GameKind::Klondike,
+        GameKind::FreeCell,
+        GameKind::Golf,
+        GameKind::TriPeaks,
+        GameKind::Pyramid,
+        GameKind::Spider1,
+    ];
+
+    /// The other games played the same way with different options, if any (Spider's suit
+    /// counts).
+    pub fn variants(self) -> &'static [GameKind] {
+        match self {
             GameKind::Spider1 | GameKind::Spider2 | GameKind::Spider4 => {
-                "Build down from King to Ace in one suit; complete runs leave the table. Any card \
-                 goes on one a rank higher. Tap the stock to deal a card onto every column."
+                &[GameKind::Spider1, GameKind::Spider2, GameKind::Spider4]
             }
+            _ => &[],
+        }
+    }
+
+    /// The name of the family of games this belongs to (e.g. "Spider" for every suit count).
+    pub fn family_name(self) -> &'static str {
+        match self {
+            GameKind::Spider1 | GameKind::Spider2 | GameKind::Spider4 => "Spider",
+            kind => kind.name(),
+        }
+    }
+
+    /// What tells this variant apart from the others in its family (e.g. "2 suits").
+    pub fn variant_name(self) -> &'static str {
+        match self {
+            GameKind::Spider1 => "1 suit (easy)",
+            GameKind::Spider2 => "2 suits (medium)",
+            GameKind::Spider4 => "4 suits (hard)",
+            kind => kind.name(),
         }
     }
 }
@@ -126,6 +189,18 @@ impl GameKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_game_is_on_the_menu() {
+        for kind in GameKind::ALL {
+            assert!(
+                GameKind::MENU
+                    .iter()
+                    .any(|&entry| entry == kind || entry.variants().contains(&kind)),
+                "{kind:?}"
+            );
+        }
+    }
 
     #[test]
     fn keys_round_trip() {
