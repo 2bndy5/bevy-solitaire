@@ -3,7 +3,7 @@ use bevy::{prelude::*, ui_widgets::Button};
 
 use crate::{
     games::GameKind,
-    hud::format_duration,
+    hud::{Undo, UndoRequested, format_duration},
     links::{self, Link},
     progress,
     state::GameState,
@@ -57,6 +57,10 @@ pub enum MenuAction {
     HowToPlay,
     /// Close the pop-up.
     ClosePopup,
+    /// Take back the last move.
+    Undo,
+    /// Take back every move, back to the deal.
+    UndoAll,
 }
 
 /// The pop-up showing over everything else, if any.
@@ -68,6 +72,8 @@ pub enum Popup {
     HowToPlay,
     /// The ways to play a family of games.
     Variants(GameKind),
+    /// The game is stuck: no moves are left.
+    NoMoves,
 }
 
 /// The look of a button: a rounded, green box.
@@ -241,6 +247,46 @@ fn spawn_tiles(
     }
 }
 
+/// Spawns `buttons` into `parent` side by side, sharing the width equally.
+fn spawn_equal_row(
+    parent: &mut ChildSpawnerCommands,
+    asset_server: &AssetServer,
+    buttons: &[(&'static str, MenuAction)],
+) {
+    parent
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            max_width: Val::Px(560.0),
+            column_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|row| {
+            for &(label, action) in buttons {
+                row.spawn((
+                    Button,
+                    action,
+                    Node {
+                        flex_basis: Val::Px(0.0),
+                        flex_grow: 1.0,
+                        min_width: Val::Px(0.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(8.0)),
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        ..default()
+                    },
+                    BackgroundColor(BUTTON_COLOR),
+                    children![(
+                        Text::new(label),
+                        TextColor(Color::WHITE),
+                        TextLayout::no_wrap(),
+                        font(asset_server, 20.0)
+                    )],
+                ));
+            }
+        });
+}
+
 /// Shows the main menu: a button for each game, then the stats and about buttons.
 pub fn main_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
     let panel = overlay(&mut commands, GameState::Menu, 0.75);
@@ -266,43 +312,16 @@ pub fn main_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
         spawn_tiles(panel, &asset_server, tiles);
         // Two equal buttons side by side. (Not a wrapping row: some phones measured its
         // wrapped height too short, so the About button overlapped the text below it.)
-        let half = |label: &'static str, action: MenuAction| {
-            (
-                Button,
-                action,
-                Node {
-                    flex_basis: Val::Px(0.0),
-                    flex_grow: 1.0,
-                    min_width: Val::Px(0.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    padding: UiRect::axes(Val::Px(8.0), Val::Px(8.0)),
-                    border_radius: BorderRadius::all(Val::Px(8.0)),
-                    ..default()
-                },
-                BackgroundColor(BUTTON_COLOR),
-                children![(
-                    Text::new(label),
-                    TextColor(Color::WHITE),
-                    TextLayout::no_wrap(),
-                    font(&asset_server, 20.0)
-                )],
-            )
-        };
-        panel.spawn((
-            Node {
-                width: Val::Percent(100.0),
-                max_width: Val::Px(560.0),
-                column_gap: Val::Px(10.0),
-                ..default()
-            },
-            children![
+        spawn_equal_row(
+            panel,
+            &asset_server,
+            &[
                 // embedded the FontAwesome trophy icon via unicode code-point
-                half("\u{F091} Best Times", MenuAction::Stats),
+                ("\u{F091} Best Times", MenuAction::Stats),
                 // embedded the FontAwesome info icon via unicode code-point
-                half("\u{F05A} About", MenuAction::About),
+                ("\u{F05A} About", MenuAction::About),
             ],
-        ));
+        );
         panel.spawn(line(
             "Drag cards to move them, or tap a card to send it to the first place it fits.",
             font(&asset_server, 16.0),
@@ -536,6 +555,9 @@ impl Plugin for MenuPlugin {
         app.init_resource::<StatsShown>()
             .init_state::<Popup>()
             .add_systems(OnEnter(Popup::HowToPlay), show_how_to_play)
+            .add_systems(OnEnter(Popup::NoMoves), show_no_moves)
+            .add_systems(Update, open_no_moves.run_if(in_state(GameState::Play)))
+            .add_systems(OnExit(GameState::Play), close_no_moves)
             .add_systems(Update, show_variants)
             .add_systems(
                 Update,
@@ -649,6 +671,47 @@ fn show_how_to_play(mut commands: Commands, asset_server: Res<AssetServer>, tabl
     });
 }
 
+/// Opens the "no moves left" pop-up when a move (or undo) leaves the game stuck.
+fn open_no_moves(
+    table: Res<Table>,
+    popup: Res<State<Popup>>,
+    mut next_popup: ResMut<NextState<Popup>>,
+) {
+    if table.is_changed() && *popup.get() == Popup::Closed && table.0.is_lost() {
+        next_popup.set(Popup::NoMoves);
+    }
+}
+
+fn close_no_moves(popup: Res<State<Popup>>, mut next_popup: ResMut<NextState<Popup>>) {
+    if *popup.get() == Popup::NoMoves {
+        next_popup.set(Popup::Closed);
+    }
+}
+
+/// Shows that the game is stuck, with ways out.
+fn show_no_moves(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let panel = popup_panel(&mut commands, Popup::NoMoves);
+    commands.entity(panel).with_children(|panel| {
+        panel.spawn(line("No moves left", font(&asset_server, 30.0)));
+        panel.spawn(line(
+            "There's nowhere left to play a card.",
+            font(&asset_server, 18.0),
+        ));
+        spawn_equal_row(
+            panel,
+            &asset_server,
+            &[
+                // embedded the FontAwesome undo icon via unicode code-point
+                ("\u{F0E2} Undo", MenuAction::Undo),
+                // embedded the FontAwesome plus icon via unicode code-point
+                ("\u{F067} New Game", MenuAction::NewGame),
+                // embedded the FontAwesome house icon via unicode code-point
+                ("\u{F015} Home", MenuAction::Home),
+            ],
+        );
+    });
+}
+
 /// Shows the ways to play a family of games, when that pop-up opens.
 fn show_variants(mut commands: Commands, asset_server: Res<AssetServer>, popup: Res<State<Popup>>) {
     let Popup::Variants(family) = *popup.get() else {
@@ -742,6 +805,7 @@ pub fn on_menu_buttons(
     mut shown: ResMut<StatsShown>,
     mut game_state: ResMut<NextState<GameState>>,
     mut popup: ResMut<NextState<Popup>>,
+    mut undo: ResMut<UndoRequested>,
 ) {
     let state = *state.get();
     let Ok(&action) = actions.get(press.entity) else {
@@ -752,6 +816,7 @@ pub fn on_menu_buttons(
     }
     match action {
         MenuAction::NewGame => {
+            popup.set(Popup::Closed);
             *next_deal = NextDeal {
                 kind: table.0.kind,
                 resume: false,
@@ -763,7 +828,10 @@ pub fn on_menu_buttons(
             popup.set(Popup::Closed);
             game_state.set(GameState::Deal);
         }
-        MenuAction::Home if state != GameState::Menu => game_state.set(GameState::Menu),
+        MenuAction::Home if state != GameState::Menu => {
+            popup.set(Popup::Closed);
+            game_state.set(GameState::Menu);
+        }
         MenuAction::Home => {}
         MenuAction::Stats => game_state.set(GameState::Stats),
         MenuAction::ShowStats(kind) => {
@@ -775,6 +843,14 @@ pub fn on_menu_buttons(
         MenuAction::Variants(kind) => popup.set(Popup::Variants(kind)),
         MenuAction::HowToPlay => popup.set(Popup::HowToPlay),
         MenuAction::ClosePopup => popup.set(Popup::Closed),
+        MenuAction::Undo | MenuAction::UndoAll => {
+            undo.0 = Some(if action == MenuAction::Undo {
+                Undo::Last
+            } else {
+                Undo::All
+            });
+            popup.set(Popup::Closed);
+        }
     }
 }
 

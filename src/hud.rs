@@ -1,8 +1,8 @@
-//! The heads-up display: move count, game clock, and the Undo and New Game buttons.
+//! The heads-up display: move count, game clock, and the game buttons (home, how to play,
+//! settings, undo, undo all and new game).
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
-    game::Game,
     menu::{MenuAction, button_node, font},
     settings::SettingsButton,
     state::GameState,
@@ -59,24 +59,18 @@ pub fn format_duration(seconds: f64) -> String {
     }
 }
 
-/// Marks the button that takes back the last move.
-#[derive(Component)]
-pub struct UndoButton;
+/// What the player asked to take back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Undo {
+    /// The last move.
+    Last,
+    /// Every move: back to the deal.
+    All,
+}
 
 /// Set when the player asks to undo; the table handles (and clears) it.
 #[derive(Resource, Default)]
-pub struct UndoRequested(pub bool);
-
-/// Requests an undo when the Undo button is pressed. See [`crate::menu::on_menu_buttons`].
-fn on_undo_button(
-    press: On<PointerPress>,
-    undo_buttons: Query<(), With<UndoButton>>,
-    mut requested: ResMut<UndoRequested>,
-) {
-    if undo_buttons.contains(press.entity) {
-        requested.0 = true;
-    }
-}
+pub struct UndoRequested(pub Option<Undo>);
 
 #[derive(Component)]
 struct MovesText;
@@ -123,67 +117,23 @@ type StatsText = Or<(With<MovesText>, With<ClockText>)>;
 #[derive(Component)]
 struct StatsBox;
 
-/// The banner along the bottom of the screen.
-#[derive(Component)]
-struct Banner;
-
-#[derive(Component)]
-struct BannerText;
-
-/// What the banner should say about `game`, if anything: that it's stuck, when it is.
-fn banner_message(game: &Game) -> Option<String> {
-    game.is_lost()
-        .then(|| "No moves left. Undo, or start a new game.".to_string())
-}
-
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameClock>()
             .init_resource::<UndoRequested>()
-            .add_observer(on_undo_button)
             .add_systems(Startup, spawn_hud)
             .add_systems(OnExit(GameState::Play), pause_clock)
             .add_systems(
                 Update,
                 (start_clock.run_if(in_state(GameState::Play)), update_hud).chain(),
             )
-            .add_systems(Update, (fit_labels, update_banner));
+            .add_systems(Update, fit_labels);
     }
 }
 
 fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
-    // A banner along the bottom for hints. See `update_banner`.
-    commands.spawn((
-        Banner,
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            left: Val::Px(12.0),
-            right: Val::Px(12.0),
-            justify_content: JustifyContent::Center,
-            ..default()
-        },
-        Visibility::Hidden,
-        children![(
-            Node {
-                max_width: Val::Px(640.0),
-                padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                ..default()
-            },
-            BackgroundColor(Color::BLACK.with_alpha(0.7)),
-            children![(
-                Text::default(),
-                TextColor(Color::WHITE),
-                TextLayout::justify(Justify::Center),
-                font(&asset_server, 16.0),
-                BannerText,
-            )],
-        )],
-    ));
-
     let text_font = font(&asset_server, 20.0);
     let button_font = font(&asset_server, 18.0);
     commands.spawn((
@@ -262,7 +212,16 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                             words: "Undo"
                         },
                         button_font.clone(),
-                        UndoButton
+                        MenuAction::Undo
+                    ),
+                    hud_button(
+                        // embedded the FontAwesome fast-backward icon via unicode code-point
+                        ResponsiveLabel {
+                            icon: "\u{F049}",
+                            words: ""
+                        },
+                        button_font.clone(),
+                        MenuAction::UndoAll
                     ),
                     hud_button(
                         // embedded the FontAwesome plus icon via unicode code-point
@@ -310,31 +269,6 @@ fn fit_labels(
     }
 }
 
-/// Shows or hides the banner, and sets its text, while a game is being played.
-fn update_banner(
-    table: Res<Table>,
-    state: Res<State<GameState>>,
-    mut banner: Single<&mut Visibility, With<Banner>>,
-    mut text: Single<&mut Text, With<BannerText>>,
-) {
-    let message = (*state.get() == GameState::Play)
-        .then(|| banner_message(&table.0))
-        .flatten();
-    let visibility = if message.is_some() {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
-    if **banner != visibility {
-        **banner = visibility;
-    }
-    if let Some(message) = message
-        && text.0 != message
-    {
-        text.0 = message;
-    }
-}
-
 /// Starts the clock on the game's first move (or right away, for a resumed game).
 fn start_clock(table: Res<Table>, time: Res<Time>, mut clock: ResMut<GameClock>) {
     if clock.running_since.is_none() && table.0.moves > 0 {
@@ -368,24 +302,6 @@ fn update_hud(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn banner_warns_only_when_stuck() {
-        use crate::{
-            cards::{Card, Rank, Suit, new_deck},
-            game::{Board, Pile, Slot},
-            games::GameKind,
-        };
-        let game = Game::deal(GameKind::Golf, new_deck());
-        assert_eq!(banner_message(&game), None);
-
-        // A Nine with nothing left to draw and a Five on the waste: stuck.
-        let mut board = Board::new(GameKind::Golf.rules().piles());
-        *board.pile_mut(Pile::Waste) = vec![Slot::up(Card::new(Rank::Five, Suit::Hearts))];
-        *board.pile_mut(Pile::Tableau(0)) = vec![Slot::up(Card::new(Rank::Nine, Suit::Clubs))];
-        let stuck = Game::with_board(GameKind::Golf, board);
-        assert!(banner_message(&stuck).unwrap().starts_with("No moves left"));
-    }
 
     #[test]
     fn formats_durations() {
