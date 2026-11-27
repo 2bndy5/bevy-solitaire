@@ -1,7 +1,7 @@
 # Bevy Solitaire
 
-A basic game of Klondike solitaire (draw one) made with [Bevy], played with 3D cards on a gently
-tilted table.
+A collection of solitaire games made with [Bevy], played with 3D cards on a gently tilted table.
+So far it has Klondike (draw one); more games are on the way.
 
 It grew out of [bevy-52-card-pickup], reusing its free
 [asset pack of hand-drawn cards][card-assets-link], card model, menus and build setup.
@@ -11,6 +11,12 @@ light or dark) and four more card backs. They're drawn by [`tools/generate_decks
 (Python with Pillow) from vector shapes; re-run it from the repository root after changing it.
 
 ## How to play
+
+Pick a game from the main menu. Your last game of each kind is saved as you play, so picking that
+game again carries on where you left off (the menu shows its moves and time). Press the house
+button in the top bar to return to the main menu at any time.
+
+### Klondike
 
 - Build the four foundations (top right) up by suit, from Ace to King.
 - Build the seven tableau piles down in alternating colors (red on black, black on red).
@@ -24,10 +30,11 @@ light or dark) and four more card backs. They're drawn by [`tools/generate_decks
 - Press "Undo" (or Ctrl+Z, Cmd+Z or U) to take back moves, one at a time.
 - Once the stock is empty and every tableau card is face up, the game finishes itself.
 - The clock starts on your first move.
-- Press "New Game" at any time to deal again.
-- Press the cog to choose the card art, table color and lighting. Your choices are remembered
-  (in the browser's local storage on the web, or a `bevy-solitaire/settings.txt` file in your
-  config folder on desktop).
+- Press "New Game" at any time to deal again (this abandons the game in play).
+- Press the cog to choose the card art, table color and lighting.
+
+Your settings and saved games are kept in the browser's local storage on the web, or in a
+`bevy-solitaire` folder in your config folder on desktop.
 
 ## Try it
 
@@ -58,13 +65,16 @@ Run the tests for the game rules with `cargo test`.
 | File            | Purpose                                                                 |
 |-----------------|-------------------------------------------------------------------------|
 | `src/cards.rs`  | Cards, ranks, suits and decks.                                          |
-| `src/game.rs`   | Klondike rules, independent of Bevy (unit tested).                      |
+| `src/game.rs`   | The game model shared by every game: piles, the board, moves, undo and saving (unit tested). |
+| `src/games/`    | Each game's rules (unit tested), and the list of games.                 |
 | `src/layout.rs` | Where piles and cards sit on the table, and pointer hit-testing.        |
 | `src/scene.rs`  | The 3D scene: tilted camera, lighting and the felt table.               |
 | `src/table.rs`  | Bevy systems: dealing, card animation, dragging and the HUD.            |
-| `src/hud.rs`    | Move count, game clock, and the Undo and New Game buttons.              |
+| `src/hud.rs`    | Move count, game clock, and the Home, Settings, Undo and New Game buttons. |
 | `src/celebrate.rs` | The win celebration.                                                 |
-| `src/menu.rs`   | Start and win screens.                                                  |
+| `src/menu.rs`   | The main menu and the win screen.                                       |
+| `src/progress.rs` | Saving and resuming the last game of each kind.                       |
+| `src/storage.rs` | Saving text in local storage (web) or the config folder (desktop).     |
 | `src/settings.rs` | Settings (card art, table color, lighting), saving them, and their panel. |
 
 [Bevy]: https://bevy.org

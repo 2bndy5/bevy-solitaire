@@ -7,7 +7,7 @@ use rand::{RngExt, rng};
 
 use crate::{
     cards::Card,
-    game::{Klondike, Pile},
+    game::Game,
     hud::{GameClock, format_duration},
     layout::HUD_HEIGHT_PX,
     menu::spawn_win_overlay,
@@ -65,16 +65,12 @@ impl Plugin for CelebratePlugin {
     }
 }
 
-/// The order in which cards leap: Kings first, round-robin across the foundations.
-fn launch_order(game: &Klondike) -> Vec<Card> {
-    let mut order = Vec::new();
-    for rank in (0..13).rev() {
-        for foundation in 0..Pile::FOUNDATIONS {
-            if let Some(slot) = game.pile(Pile::Foundation(foundation)).get(rank) {
-                order.push(slot.card);
-            }
-        }
-    }
+/// The order in which cards leap: Kings first, then Queens, and so on down to the Aces, each rank
+/// taken pile by pile.
+fn launch_order(game: &Game) -> Vec<Card> {
+    let mut order: Vec<Card> = game.board().cards().map(|slot| slot.card).collect();
+    // A stable sort keeps each rank in pile order.
+    order.sort_by_key(|card| std::cmp::Reverse(card.rank));
     order.reverse(); // popped from the end
     order
 }
@@ -203,15 +199,16 @@ fn show_overlay(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cards::{Rank, new_deck};
+    use crate::{
+        cards::{Rank, new_deck},
+        games::GameKind,
+    };
 
     #[test]
     fn kings_leap_first_and_every_card_leaps_once() {
-        let mut won = Klondike::with_waste(new_deck().into_iter().rev().collect());
-        while won.move_to_foundation(Pile::Waste) {}
-        assert!(won.is_won());
+        let game = Game::deal(GameKind::Klondike, new_deck());
 
-        let mut order = launch_order(&won);
+        let mut order = launch_order(&game);
         assert_eq!(order.len(), 52);
         let unique: std::collections::HashSet<_> = order.iter().collect();
         assert_eq!(unique.len(), 52);

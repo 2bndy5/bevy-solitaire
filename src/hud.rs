@@ -2,7 +2,7 @@
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
-    menu::{StartButton, button_node, font},
+    menu::{HomeButton, StartButton, button_node, font},
     settings::SettingsButton,
     state::GameState,
     table::Table,
@@ -11,22 +11,39 @@ use crate::{
 /// Windows narrower than this (in logical pixels) show only icons on the HUD's buttons.
 const NARROW_HUD_PX: f32 = 560.0;
 
-/// When the current game's clock started and stopped, in seconds since the app started.
+/// Time played on the current game.
 ///
-/// The clock starts on the first move and stops when the game is won.
+/// The clock starts on the first move, pauses while the game isn't being played (on the main menu,
+/// say) and stops when the game is won.
 #[derive(Resource, Default)]
 pub struct GameClock {
-    started: Option<f64>,
-    stopped: Option<f64>,
+    /// Seconds played before the clock last started.
+    banked: f64,
+    /// When the clock last started, in seconds since the app started, if it is running.
+    running_since: Option<f64>,
 }
 
 impl GameClock {
+    /// A stopped clock showing `seconds` already played.
+    pub fn resumed(seconds: f64) -> Self {
+        Self {
+            banked: seconds,
+            running_since: None,
+        }
+    }
+
     /// Seconds played so far, given the current time `now`.
     pub fn elapsed(&self, now: f64) -> f64 {
-        match self.started {
-            Some(start) => self.stopped.unwrap_or(now) - start,
-            None => 0.0,
-        }
+        self.banked + self.running_since.map_or(0.0, |start| now - start)
+    }
+
+    fn start(&mut self, now: f64) {
+        self.running_since.get_or_insert(now);
+    }
+
+    fn pause(&mut self, now: f64) {
+        self.banked = self.elapsed(now);
+        self.running_since = None;
     }
 }
 
@@ -49,7 +66,7 @@ pub struct UndoButton;
 #[derive(Resource, Default)]
 pub struct UndoRequested(pub bool);
 
-/// Requests an undo when the Undo button is pressed. See [`crate::menu::on_start_button`].
+/// Requests an undo when the Undo button is pressed. See [`crate::menu::on_menu_buttons`].
 fn on_undo_button(
     press: On<PointerPress>,
     undo_buttons: Query<(), With<UndoButton>>,
@@ -106,9 +123,11 @@ impl Plugin for HudPlugin {
             .init_resource::<UndoRequested>()
             .add_observer(on_undo_button)
             .add_systems(Startup, spawn_hud)
-            .add_systems(OnEnter(GameState::Deal), reset_clock)
-            .add_systems(OnEnter(GameState::Win), stop_clock)
-            .add_systems(Update, (start_clock, update_hud).chain())
+            .add_systems(OnExit(GameState::Play), pause_clock)
+            .add_systems(
+                Update,
+                (start_clock.run_if(in_state(GameState::Play)), update_hud).chain(),
+            )
             .add_systems(Update, fit_labels);
     }
 }
@@ -156,6 +175,15 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                 },
                 children![
                     hud_button(
+                        // embedded the FontAwesome house icon via unicode code-point
+                        ResponsiveLabel {
+                            icon: "\u{F015}",
+                            words: ""
+                        },
+                        button_font.clone(),
+                        HomeButton
+                    ),
+                    hud_button(
                         // embedded the FontAwesome cog icon via unicode code-point
                         ResponsiveLabel {
                             icon: "\u{F013}",
@@ -202,21 +230,15 @@ fn fit_labels(
     }
 }
 
-fn reset_clock(mut clock: ResMut<GameClock>) {
-    *clock = GameClock::default();
-}
-
-/// Starts the clock on the game's first move.
+/// Starts the clock on the game's first move (or right away, for a resumed game).
 fn start_clock(table: Res<Table>, time: Res<Time>, mut clock: ResMut<GameClock>) {
-    if clock.started.is_none() && table.0.moves > 0 {
-        clock.started = Some(time.elapsed_secs_f64());
+    if clock.running_since.is_none() && table.0.moves > 0 {
+        clock.start(time.elapsed_secs_f64());
     }
 }
 
-fn stop_clock(time: Res<Time>, mut clock: ResMut<GameClock>) {
-    if clock.started.is_some() {
-        clock.stopped = Some(time.elapsed_secs_f64());
-    }
+fn pause_clock(time: Res<Time>, mut clock: ResMut<GameClock>) {
+    clock.pause(time.elapsed_secs_f64());
 }
 
 fn update_hud(
@@ -251,12 +273,20 @@ mod tests {
     }
 
     #[test]
-    fn clock_runs_from_start_until_stopped() {
+    fn clock_runs_from_start_until_paused() {
         let mut clock = GameClock::default();
         assert_eq!(clock.elapsed(100.0), 0.0);
-        clock.started = Some(10.0);
+        clock.start(10.0);
         assert_eq!(clock.elapsed(25.0), 15.0);
-        clock.stopped = Some(30.0);
+        clock.start(20.0); // already running
+        assert_eq!(clock.elapsed(25.0), 15.0);
+        clock.pause(30.0);
         assert_eq!(clock.elapsed(100.0), 20.0);
+        // Resuming carries on from where it left off.
+        clock.start(200.0);
+        assert_eq!(clock.elapsed(205.0), 25.0);
+
+        let resumed = GameClock::resumed(61.0);
+        assert_eq!(resumed.elapsed(1000.0), 61.0);
     }
 }

@@ -1,8 +1,17 @@
-//! Start and win screens, adapted from `bevy-52-card-pickup`.
-use crate::state::GameState;
+//! The main menu and the win screen, adapted from `bevy-52-card-pickup`.
 use bevy::{prelude::*, ui_widgets::Button};
 
+use crate::{
+    games::GameKind,
+    hud::format_duration,
+    progress,
+    state::GameState,
+    table::{NextDeal, Table},
+};
+
 const FONT_PATH: &str = "fonts/UbuntuNerdFont-Medium.ttf";
+/// The color of buttons.
+const BUTTON_COLOR: Color = Color::srgb(0.125, 0.6, 0.125);
 
 pub fn font(asset_server: &AssetServer, size: f32) -> TextFont {
     TextFont {
@@ -12,9 +21,17 @@ pub fn font(asset_server: &AssetServer, size: f32) -> TextFont {
     }
 }
 
-/// Marks buttons that (re)start the game when pressed. See [`on_start_button`].
+/// Marks buttons that deal a new game of the current kind when pressed. See [`on_menu_buttons`].
 #[derive(Component)]
 pub struct StartButton;
+
+/// Marks buttons that return to the main menu when pressed.
+#[derive(Component)]
+pub struct HomeButton;
+
+/// A main menu button that plays a game of its kind, picking up the saved one if there is one.
+#[derive(Component)]
+pub struct PlayButton(GameKind);
 
 /// The look of a button: a rounded, green box.
 pub fn button_node(padding: UiRect) -> impl Bundle {
@@ -26,30 +43,25 @@ pub fn button_node(padding: UiRect) -> impl Bundle {
             align_items: AlignItems::Center,
             ..default()
         },
-        BackgroundColor(Color::srgb(0.125, 0.6, 0.125)),
+        BackgroundColor(BUTTON_COLOR),
     )
 }
 
-/// A button that (re)starts the game when pressed.
-pub fn start_button(label: &str, font: TextFont) -> impl Bundle {
+/// A button labeled `label`, tagged with `marker`.
+fn text_button(label: &str, font: TextFont, marker: impl Bundle) -> impl Bundle {
     (
         button_node(UiRect::axes(Val::Px(16.0), Val::Px(8.0))),
-        StartButton,
+        marker,
         // TextFont component (pointing to nerd font asset) must be in same bundle as
         // the Text component for the font to render the unicode code-point correctly.
         children![(Text::new(label), TextColor(Color::WHITE), font)],
     )
 }
 
-/// A full-screen, semi-transparent overlay holding `lines` of text and a start button.
-fn overlay(
-    commands: &mut Commands,
-    asset_server: &AssetServer,
-    state: GameState,
-    lines: &[(&str, f32)],
-    button_label: &str,
-    dim: f32,
-) {
+/// Spawns a full-screen, semi-transparent overlay for `state` with a panel in the middle, and
+/// returns the panel, for the caller to fill.
+fn overlay(commands: &mut Commands, state: GameState, dim: f32) -> Entity {
+    let mut panel = Entity::PLACEHOLDER;
     commands
         .spawn((
             Node {
@@ -58,7 +70,6 @@ fn overlay(
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(12.0),
                 padding: UiRect::all(Val::Px(16.0)),
                 ..default()
             },
@@ -68,56 +79,100 @@ fn overlay(
         ))
         .with_children(|root| {
             // A panel behind the text keeps it readable over whatever is on the table.
-            root.spawn((
-                Node {
-                    // Fill narrow screens (wrapping the text) but don't sprawl on wide ones.
-                    width: Val::Percent(100.0),
-                    max_width: Val::Px(760.0),
-                    align_items: AlignItems::Center,
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(12.0),
-                    padding: UiRect::all(Val::Px(24.0)),
-                    border_radius: BorderRadius::all(Val::Px(16.0)),
-                    ..default()
-                },
-                // Blending happens in linear color, so it takes a high alpha to dim white cards
-                // enough for white text to stand out.
-                BackgroundColor(Color::BLACK.with_alpha(0.85)),
-            ))
-            .with_children(|panel| {
-                for &(line, size) in lines {
-                    panel.spawn((
-                        Text::new(line),
-                        TextColor(Color::WHITE),
-                        TextLayout::justify(Justify::Center),
-                        font(asset_server, size),
-                    ));
-                }
-                panel.spawn(start_button(button_label, font(asset_server, 24.0)));
-            });
+            panel = root
+                .spawn((
+                    Node {
+                        // Fill narrow screens (wrapping the text) but don't sprawl on wide ones.
+                        width: Val::Percent(100.0),
+                        max_width: Val::Px(760.0),
+                        align_items: AlignItems::Center,
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(12.0),
+                        padding: UiRect::all(Val::Px(24.0)),
+                        border_radius: BorderRadius::all(Val::Px(16.0)),
+                        ..default()
+                    },
+                    // Blending happens in linear color, so it takes a high alpha to dim white
+                    // cards enough for white text to stand out.
+                    BackgroundColor(Color::BLACK.with_alpha(0.85)),
+                ))
+                .id();
         });
+    panel
 }
 
-/// System that runs when entering the [`GameState::Menu`] state (on game startup only).
-pub fn hello_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
-    overlay(
-        &mut commands,
-        &asset_server,
-        GameState::Menu,
-        &[
-            // embedded the MD hand wave emoji via unicode code-point
-            ("\u{F1821} Welcome to Solitaire!", 36.0),
-            (
-                "Build each foundation up by suit from Ace to King.\n\
-                 Drag cards to move them; build the tableau down in alternating colors.\n\
-                 Click the stock to draw. Click a card to move it to the first place it fits.",
-                20.0,
-            ),
-        ],
-        // embedded the FontAwesome Play icon (circle variant) via unicode code-point
-        "\u{F01D} Start Game",
-        0.75,
-    );
+/// A line of centered text.
+fn line(text: impl Into<String>, font: TextFont) -> impl Bundle {
+    (
+        Text::new(text),
+        TextColor(Color::WHITE),
+        TextLayout::justify(Justify::Center),
+        font,
+    )
+}
+
+/// What the main menu says about the saved game of `kind`.
+fn saved_game_status(kind: GameKind) -> String {
+    match progress::load(kind) {
+        Some(saved) if saved.game.moves > 0 => format!(
+            // embedded the FontAwesome play icon via unicode code-point
+            "\u{F04B} Continue: {} moves, {}",
+            saved.game.moves,
+            format_duration(saved.seconds)
+        ),
+        _ => "\u{F067} New game".to_string(),
+    }
+}
+
+/// Shows the main menu: a button for each game.
+pub fn main_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let panel = overlay(&mut commands, GameState::Menu, 0.75);
+    commands.entity(panel).with_children(|panel| {
+        // embedded the MD hand wave emoji via unicode code-point
+        panel.spawn(line(
+            "\u{F1821} Welcome to Solitaire!",
+            font(&asset_server, 36.0),
+        ));
+        panel.spawn(line("Choose a game:", font(&asset_server, 20.0)));
+        for kind in GameKind::ALL {
+            panel.spawn((
+                Button,
+                PlayButton(kind),
+                Node {
+                    width: Val::Percent(100.0),
+                    max_width: Val::Px(560.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Start,
+                    row_gap: Val::Px(4.0),
+                    padding: UiRect::axes(Val::Px(16.0), Val::Px(10.0)),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                    ..default()
+                },
+                BackgroundColor(BUTTON_COLOR),
+                children![
+                    (
+                        Text::new(kind.name()),
+                        TextColor(Color::WHITE),
+                        font(&asset_server, 24.0),
+                    ),
+                    (
+                        Text::new(kind.summary()),
+                        TextColor(Color::WHITE.with_alpha(0.85)),
+                        font(&asset_server, 16.0),
+                    ),
+                    (
+                        Text::new(saved_game_status(kind)),
+                        TextColor(Color::srgb(0.8, 1.0, 0.8)),
+                        font(&asset_server, 16.0),
+                    ),
+                ],
+            ));
+        }
+        panel.spawn(line(
+            "Drag cards to move them, or tap a card to send it to the first place it fits.",
+            font(&asset_server, 16.0),
+        ));
+    });
 }
 
 /// Shows the win screen with the game's statistics.
@@ -130,18 +185,27 @@ pub fn spawn_win_overlay(
     time: &str,
 ) {
     let stats = format!("You cleared the table in {moves} moves and {time}.");
-    overlay(
-        commands,
-        asset_server,
-        GameState::Win,
-        &[
-            // embedded the Octicons rocket icon via unicode code-point
-            ("Congratulations! \u{f427}", 40.0),
-            (&stats, 28.0),
-        ],
-        "\u{F01D} Play Again",
-        0.45,
-    );
+    let panel = overlay(commands, GameState::Win, 0.45);
+    commands.entity(panel).with_children(|panel| {
+        // embedded the Octicons rocket icon via unicode code-point
+        panel.spawn(line("Congratulations! \u{f427}", font(asset_server, 40.0)));
+        panel.spawn(line(stats, font(asset_server, 28.0)));
+        panel.spawn((
+            Node {
+                column_gap: Val::Px(12.0),
+                row_gap: Val::Px(12.0),
+                flex_wrap: FlexWrap::Wrap,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            children![
+                // embedded the FontAwesome Play icon (circle variant) via unicode code-point
+                text_button("\u{F01D} Play Again", font(asset_server, 24.0), StartButton),
+                // embedded the FontAwesome house icon via unicode code-point
+                text_button("\u{F015} Home", font(asset_server, 24.0), HomeButton),
+            ],
+        ));
+    });
 }
 
 /// Shrinks the whole UI on small screens, so panels fit without scrolling.
@@ -168,19 +232,36 @@ fn ui_scale_for(window: Vec2) -> f32 {
     fit.x.min(fit.y).clamp(MIN_UI_SCALE, 1.0)
 }
 
-/// Starts a new deal whenever a start button is pressed.
+/// Acts on presses of the start, home and play buttons.
 ///
 /// Buttons act on the pointer's press event, which arrives once per press. (The button widget's
 /// own `Activate` event can be missed when a press and release land in the same frame.)
-pub fn on_start_button(
+#[allow(clippy::too_many_arguments)]
+pub fn on_menu_buttons(
     press: On<PointerPress>,
     start_buttons: Query<(), With<StartButton>>,
+    home_buttons: Query<(), With<HomeButton>>,
+    play_buttons: Query<&PlayButton>,
+    table: Res<Table>,
     state: Res<State<GameState>>,
+    mut next_deal: ResMut<NextDeal>,
     mut game_state: ResMut<NextState<GameState>>,
 ) {
-    if start_buttons.contains(press.entity) && *state.get() != GameState::Loading {
-        info!("Starting a new game");
+    let state = *state.get();
+    if state == GameState::Loading {
+        return;
+    }
+    if start_buttons.contains(press.entity) {
+        *next_deal = NextDeal {
+            kind: table.0.kind,
+            resume: false,
+        };
         game_state.set(GameState::Deal);
+    } else if let Ok(&PlayButton(kind)) = play_buttons.get(press.entity) {
+        *next_deal = NextDeal { kind, resume: true };
+        game_state.set(GameState::Deal);
+    } else if home_buttons.contains(press.entity) && state != GameState::Menu {
+        game_state.set(GameState::Menu);
     }
 }
 
