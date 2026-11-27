@@ -4,10 +4,13 @@ use crate::game::Rules;
 mod freecell;
 mod golf;
 mod klondike;
+mod rows;
+mod tripeaks;
 
 pub use freecell::FreeCell;
 pub use golf::Golf;
 pub use klondike::Klondike;
+pub use tripeaks::TriPeaks;
 
 /// One of the games on offer.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
@@ -16,11 +19,17 @@ pub enum GameKind {
     Klondike,
     FreeCell,
     Golf,
+    TriPeaks,
 }
 
 impl GameKind {
     /// Every game, in the order the main menu lists them.
-    pub const ALL: [GameKind; 3] = [GameKind::Klondike, GameKind::FreeCell, GameKind::Golf];
+    pub const ALL: [GameKind; 4] = [
+        GameKind::Klondike,
+        GameKind::FreeCell,
+        GameKind::Golf,
+        GameKind::TriPeaks,
+    ];
 
     /// The game's rules.
     pub fn rules(self) -> &'static dyn Rules {
@@ -28,6 +37,7 @@ impl GameKind {
             GameKind::Klondike => &Klondike,
             GameKind::FreeCell => &FreeCell,
             GameKind::Golf => &Golf,
+            GameKind::TriPeaks => &TriPeaks,
         }
     }
 
@@ -37,6 +47,7 @@ impl GameKind {
             GameKind::Klondike => "klondike",
             GameKind::FreeCell => "freecell",
             GameKind::Golf => "golf",
+            GameKind::TriPeaks => "tripeaks",
         }
     }
 
@@ -50,6 +61,7 @@ impl GameKind {
             GameKind::Klondike => "Klondike",
             GameKind::FreeCell => "FreeCell",
             GameKind::Golf => "Golf",
+            GameKind::TriPeaks => "TriPeaks",
         }
     }
 
@@ -67,6 +79,10 @@ impl GameKind {
             GameKind::Golf => {
                 "Clear the seven columns: play a top card onto the waste if it is one rank above \
                  or below the waste's top card. Tap the stock for a new waste card."
+            }
+            GameKind::TriPeaks => {
+                "Clear the three peaks: play an uncovered card onto the waste if it is one rank \
+                 above or below the waste's top card (King and Ace connect)."
             }
         }
     }
