@@ -68,7 +68,7 @@ impl Layout {
         let hud = 50.0;
         let gap = 25.0;
         // Room for the hint banner (see `crate::hud`), so it doesn't cover cards.
-        let bottom_margin = 55.0;
+        let bottom_margin = 50.0;
         let row_spacing = CARD_H + gap;
         let height = hud + CARD_H + shape.fan_row * row_spacing + max_fan + bottom_margin;
         let top_row_y = height / 2.0 - hud - CARD_H / 2.0;
