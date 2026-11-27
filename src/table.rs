@@ -1,15 +1,17 @@
-//! Bevy systems that render the [`Klondike`] game as 3D cards on the table and translate pointer
-//! input into moves.
+//! Bevy systems that render the game in play as 3D cards on the table and translate pointer input
+//! into moves.
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use bevy::{platform::collections::HashMap, prelude::*, window::PrimaryWindow};
 
 use crate::{
-    cards::{CARD_H, CARD_W, Card, new_deck, shuffle_deck},
+    cards::{CARD_H, CARD_W, Card},
     celebrate::Flying,
-    game::{Klondike, Pile},
-    hud::UndoRequested,
+    game::{Game, Pile},
+    games::GameKind,
+    hud::{GameClock, UndoRequested},
     layout::{HUD_HEIGHT_PX, Layout},
+    progress,
     scene::{TableCamera, pointer_on_plane, to_table, to_world},
     settings::{Settings, SettingsPanel},
     state::GameState,
@@ -51,7 +53,15 @@ const AUTO_FINISH_MIN_INTERVAL: f32 = 0.03;
 
 /// The game being played.
 #[derive(Resource, Default)]
-pub struct Table(pub Klondike);
+pub struct Table(pub Game);
+
+/// The game to set up on entering [`GameState::Deal`].
+#[derive(Resource, Default, Clone, Copy)]
+pub struct NextDeal {
+    pub kind: GameKind,
+    /// Pick up the saved game of this kind, if there is one, instead of dealing a new one.
+    pub resume: bool,
+}
 
 /// Mesh and materials shared by the cards and pile outlines.
 #[derive(Resource)]
@@ -143,11 +153,12 @@ pub struct TablePlugin;
 impl Plugin for TablePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Table>()
+            .init_resource::<NextDeal>()
             .init_resource::<CardEntities>()
             .init_resource::<PointerState>()
             .init_resource::<AutoFinish>()
             .init_resource::<AnimationSpeed>()
-            .add_systems(Startup, (load_card_assets, spawn_slots).chain())
+            .add_systems(Startup, load_card_assets)
             .add_systems(Update, (place_outlines, apply_settings))
             .add_systems(OnEnter(GameState::Deal), (deal, reset_auto_finish))
             .add_systems(
@@ -196,7 +207,8 @@ fn load_card_assets(
         })
     };
     let back = card_material(settings.back.path().to_string());
-    let faces = new_deck()
+    // Every game is played with (some of) the standard 52 cards.
+    let faces = crate::cards::new_deck()
         .into_iter()
         .map(|card| (card, card_material(settings.deck.face_path(card))))
         .collect();
@@ -239,18 +251,6 @@ fn apply_settings(
 #[derive(Component)]
 struct PileOutline(Pile);
 
-/// Spawns faint outlines marking where each pile goes. See [`place_outlines`].
-fn spawn_slots(mut commands: Commands, assets: Res<CardAssets>) {
-    for pile in Klondike::all_piles() {
-        commands.spawn((
-            PileOutline(pile),
-            Mesh3d(assets.mesh.clone()),
-            MeshMaterial3d(assets.slot.clone()),
-            Transform::from_rotation(card_rotation(true)).with_scale(Vec3::new(0.95, 0.96, 1.0)),
-        ));
-    }
-}
-
 /// Moves the pile outlines into place whenever the layout changes.
 fn place_outlines(layout: Res<Layout>, mut outlines: Query<(&PileOutline, &mut Transform)>) {
     if !layout.is_changed() {
@@ -261,31 +261,71 @@ fn place_outlines(layout: Res<Layout>, mut outlines: Query<(&PileOutline, &mut T
     }
 }
 
-/// Starts a new game: shuffles, deals, and spawns every card.
+/// Cards and pile outlines: everything a deal replaces.
+type OnTable = Or<(With<CardView>, With<PileOutline>)>;
+
+/// Sets up the game [`NextDeal`] asks for: picks up its saved game or deals a new one, and spawns
+/// the pile outlines and every card.
 #[allow(clippy::too_many_arguments)]
 fn deal(
     mut commands: Commands,
-    old_cards: Query<Entity, With<CardView>>,
+    old_table: Query<Entity, OnTable>,
+    window: Single<&Window, With<PrimaryWindow>>,
     assets: Res<CardAssets>,
-    layout: Res<Layout>,
+    next: Res<NextDeal>,
+    mut layout: ResMut<Layout>,
     mut table: ResMut<Table>,
+    mut clock: ResMut<GameClock>,
     mut entities: ResMut<CardEntities>,
     mut pointer: ResMut<PointerState>,
     mut game_state: ResMut<NextState<GameState>>,
 ) {
-    for entity in &old_cards {
+    for entity in &old_table {
         commands.entity(entity).despawn();
     }
     *pointer = PointerState::default();
-    table.0 = Klondike::deal(shuffle_deck());
-    // All cards start face down on the stock, then glide out to their dealt positions.
-    let stock = layout.pile_origin(Pile::Stock);
-    entities.0 = new_deck()
-        .into_iter()
+    let kind = next.kind;
+    let saved = next.resume.then(|| progress::load(kind)).flatten();
+    let (game, seconds) = match saved {
+        Some(saved) => {
+            info!("Resuming {} after {} moves", kind.name(), saved.game.moves);
+            (saved.game, saved.seconds)
+        }
+        None => {
+            info!("Dealing {}", kind.name());
+            let deck = crate::cards::shuffled(kind.rules().deck());
+            (Game::deal(kind, deck), 0.0)
+        }
+    };
+    table.0 = game;
+    *clock = GameClock::resumed(seconds);
+    let new_layout = Layout::for_window(kind, window.size());
+    if *layout != new_layout {
+        *layout = new_layout;
+    }
+
+    for pile in table.0.piles() {
+        commands.spawn((
+            PileOutline(pile),
+            Mesh3d(assets.mesh.clone()),
+            MeshMaterial3d(assets.slot.clone()),
+            Transform::from_translation(to_world(layout.pile_origin(pile), 0.1))
+                .with_rotation(card_rotation(true))
+                .with_scale(Vec3::new(0.95, 0.96, 1.0)),
+        ));
+    }
+
+    // All cards start face down where cards are dealt from, then glide out to their places.
+    let origin = layout.deal_origin(&table.0);
+    entities.0 = table
+        .0
+        .board()
+        .cards()
         .enumerate()
-        .map(|(i, card)| {
+        .map(|(i, slot)| {
+            let card = slot.card;
             let height = REST_HEIGHT + i as f32 * CARD_GAP;
-            let start = to_world(stock, height);
+            let start = to_world(origin, height);
             let entity = commands
                 .spawn((
                     CardView {
@@ -434,8 +474,12 @@ fn pointer_input(
                     }
                 }
             }
-        } else if let Some(to) = layout.drop_target(&table.0, lead) {
-            table.0.try_move(drag.from, drag.index, to);
+        } else {
+            let game = &table.0;
+            let accepts = |to| game.can_move(drag.from, drag.index, to);
+            if let Some(to) = layout.drop_target(game, lead, accepts) {
+                table.0.try_move(drag.from, drag.index, to);
+            }
         }
         // Even if the move failed, the cards must glide back to their piles.
         table.set_changed();
@@ -531,7 +575,7 @@ fn sync_cards(
         return;
     }
     let game = &table.0;
-    for pile in Klondike::all_piles() {
+    for pile in game.piles() {
         for (index, slot) in game.pile(pile).iter().enumerate() {
             let Some(Ok(mut view)) = entities.0.get(&slot.card).map(|&e| cards.get_mut(e)) else {
                 continue;

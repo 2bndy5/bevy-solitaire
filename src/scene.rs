@@ -9,7 +9,7 @@ use bevy::{
     light::CascadeShadowConfigBuilder, prelude::*, render::view::Tonemapping, window::PrimaryWindow,
 };
 
-use crate::{layout::Layout, settings::Settings, state::GameState};
+use crate::{layout::Layout, settings::Settings, state::GameState, table::Table};
 
 /// The camera's vertical field of view. Narrow, to keep perspective distortion gentle.
 const CAMERA_FOV: f32 = FRAC_PI_6;
@@ -127,9 +127,11 @@ fn camera_transform(distance: f32, tilt: f32) -> Transform {
     Transform::from_translation(eye).looking_at(Vec3::ZERO, Vec3::NEG_Z)
 }
 
-/// Picks the table layout for the window's shape, and moves the camera so the whole table fits.
+/// Picks the table layout for the game and the window's shape, and moves the camera so the whole
+/// table fits.
 fn fit_to_window(
-    window: Single<&Window, (With<PrimaryWindow>, Changed<Window>)>,
+    window: Single<Ref<Window>, With<PrimaryWindow>>,
+    table: Res<Table>,
     mut layout: ResMut<Layout>,
     mut camera: Single<&mut Transform, With<TableCamera>>,
 ) {
@@ -137,9 +139,12 @@ fn fit_to_window(
     if size.x <= 0.0 || size.y <= 0.0 {
         return;
     }
-    let new_layout = Layout::for_window(size);
+    let new_layout = Layout::for_window(table.0.kind, size);
     if *layout != new_layout {
         *layout = new_layout;
+    }
+    if !window.is_changed() && !layout.is_changed() {
+        return;
     }
     let aspect = size.x / size.y;
     let half_fov = (CAMERA_FOV / 2.0).tan();

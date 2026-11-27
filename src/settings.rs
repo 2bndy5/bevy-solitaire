@@ -5,6 +5,7 @@ use bevy::{prelude::*, ui::FocusPolicy, ui_widgets::Button};
 use crate::{
     cards::{Card, Rank, Suit},
     menu::{button_node, font},
+    storage,
 };
 
 /// One of a fixed set of options for a setting.
@@ -341,56 +342,6 @@ impl Settings {
     }
 }
 
-/// Saving settings in the browser's local storage.
-#[cfg(target_arch = "wasm32")]
-mod storage {
-    const KEY: &str = "bevy-solitaire-settings";
-
-    fn local_storage() -> Option<web_sys::Storage> {
-        web_sys::window()?.local_storage().ok()?
-    }
-
-    pub fn load() -> Option<String> {
-        local_storage()?.get_item(KEY).ok()?
-    }
-
-    pub fn save(text: &str) {
-        if let Some(storage) = local_storage() {
-            let _ = storage.set_item(KEY, text);
-        }
-    }
-}
-
-/// Saving settings in a file in the user's config folder.
-#[cfg(not(target_arch = "wasm32"))]
-mod storage {
-    use std::{env, fs, path::PathBuf};
-
-    fn path() -> Option<PathBuf> {
-        let config = env::var_os("APPDATA")
-            .or_else(|| env::var_os("XDG_CONFIG_HOME"))
-            .map(PathBuf::from)
-            .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
-        Some(config.join("bevy-solitaire").join("settings.txt"))
-    }
-
-    pub fn load() -> Option<String> {
-        fs::read_to_string(path()?).ok()
-    }
-
-    pub fn save(text: &str) {
-        let Some(path) = path() else {
-            return;
-        };
-        if let Some(dir) = path.parent() {
-            let _ = fs::create_dir_all(dir);
-        }
-        if let Err(error) = fs::write(&path, text) {
-            bevy::log::warn!("Couldn't save settings to {}: {error}", path.display());
-        }
-    }
-}
-
 /// Whether the settings panel is showing.
 #[derive(States, Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SettingsPanel {
@@ -448,11 +399,14 @@ const PREVIEW_CARDS: [Card; 4] = [
 const SELECTED: Color = Color::srgb(0.125, 0.6, 0.125);
 const UNSELECTED: Color = Color::srgb(0.25, 0.27, 0.26);
 
+/// Where the settings are saved. See [`crate::storage`].
+const STORAGE_NAME: &str = "settings";
+
 pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
-        let settings = storage::load()
+        let settings = storage::load(STORAGE_NAME)
             .map(|text| Settings::from_text(&text))
             .unwrap_or_default();
         app.insert_resource(settings)
@@ -470,7 +424,7 @@ impl Plugin for SettingsPlugin {
 
 /// Handles presses on the settings, close and option buttons.
 ///
-/// Acts on the press (see [`crate::menu::on_start_button`] for why).
+/// Acts on the press (see [`crate::menu::on_menu_buttons`] for why).
 fn on_press(
     press: On<PointerPress>,
     picks: Query<&Pick>,
@@ -501,7 +455,7 @@ fn close_on_escape(keys: Res<ButtonInput<KeyCode>>, mut panel: ResMut<NextState<
 
 fn save_settings(settings: Res<Settings>) {
     if settings.is_changed() && !settings.is_added() {
-        storage::save(&settings.to_text());
+        storage::save(STORAGE_NAME, &settings.to_text());
     }
 }
 

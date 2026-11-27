@@ -7,7 +7,7 @@ pub const CARD_W: f32 = 84.0;
 /// Rendered card height (in world units).
 pub const CARD_H: f32 = 120.0;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Card {
     pub rank: Rank,
     pub suit: Suit,
@@ -22,6 +22,15 @@ impl Card {
     /// number and its suit's initial, e.g. `12h` for the Queen of Hearts.
     pub fn file_stem(&self) -> String {
         format!("{}{}", self.rank.as_u8(), self.suit.short_name())
+    }
+
+    /// Reads a name written by [`Card::file_stem`].
+    pub fn from_file_stem(stem: &str) -> Option<Self> {
+        let (rank, suit) = stem.split_at_checked(stem.len().checked_sub(1)?)?;
+        let rank = rank.parse::<u8>().ok()?;
+        let rank = *Rank::ALL.iter().find(|r| r.as_u8() == rank)?;
+        let suit = *Suit::ALL.iter().find(|s| s.short_name() == suit)?;
+        Some(Self::new(rank, suit))
     }
 
     /// Path (relative to the `assets` folder) of this card's face image.
@@ -96,7 +105,7 @@ impl fmt::Display for Rank {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Suit {
     Clubs,
     Diamonds,
@@ -144,11 +153,16 @@ pub fn new_deck() -> Vec<Card> {
         .collect()
 }
 
-/// Returns all 52 cards in a random order.
-pub fn shuffle_deck() -> Vec<Card> {
-    let mut deck = new_deck();
+/// Returns `deck` in a random order.
+pub fn shuffled(mut deck: Vec<Card>) -> Vec<Card> {
     deck.shuffle(&mut rng());
     deck
+}
+
+/// Returns all 52 cards in a random order.
+#[cfg(test)]
+pub fn shuffle_deck() -> Vec<Card> {
+    shuffled(new_deck())
 }
 
 #[cfg(test)]
@@ -161,6 +175,16 @@ mod tests {
         let unique: std::collections::HashSet<_> = deck.iter().collect();
         assert_eq!(deck.len(), 52);
         assert_eq!(unique.len(), 52);
+    }
+
+    #[test]
+    fn file_stems_round_trip() {
+        for card in new_deck() {
+            assert_eq!(Card::from_file_stem(&card.file_stem()), Some(card));
+        }
+        for bad in ["", "h", "0h", "14s", "12x", "Qh"] {
+            assert_eq!(Card::from_file_stem(bad), None, "{bad}");
+        }
     }
 
     #[test]
