@@ -20,7 +20,7 @@ light or dark) and four more card backs. They're drawn by [`tools/generate_decks
 - Drag a card (and any cards on top of it) to move it.
 - Click (or tap) a card to move it, and any cards on top of it, to the first place it fits: a
   foundation if it can go there, otherwise the next tableau column (to the right, wrapping around)
-  that takes it. Click again to move it on to the next option.
+  that takes it. Click again to move it on to the next option. If it has nowhere to go, it shakes.
 - Press "Undo" (or Ctrl+Z, Cmd+Z or U) to take back moves, one at a time.
 - Once the stock is empty and every tableau card is face up, the game finishes itself.
 - The clock starts on your first move.

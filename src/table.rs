@@ -30,6 +30,12 @@ pub const REST_HEIGHT: f32 = 0.5;
 const CARD_GAP: f32 = 0.5;
 /// How far travelling cards rise, so they pass over resting cards.
 const TRAVEL_LIFT: f32 = 25.0;
+/// How long a card shakes when tapped with nowhere to go, in seconds.
+const SHAKE_SECS: f32 = 0.4;
+/// How far (in table units) a shaking card first swings to each side.
+const SHAKE_AMPLITUDE: f32 = 7.0;
+/// How many times a second a shaking card swings back and forth.
+const SHAKE_FREQUENCY: f32 = 14.0;
 /// Height of cards being dragged.
 const DRAG_HEIGHT: f32 = 40.0;
 /// Gap between a card's face and back quads.
@@ -89,6 +95,21 @@ struct CardView {
     face_up: bool,
     /// The card's current height before any lift from turning over.
     height: f32,
+    /// When the card started shaking (seconds since the app started), if it is shaking.
+    shake_started: Option<f32>,
+    /// The sideways shake offset applied last frame, so it can be taken out again.
+    shake_offset: f32,
+}
+
+/// The sideways offset of a card `t` seconds into a shake, or `None` once the shake is over.
+///
+/// A few quick swings that die away, like a head shaking "no".
+fn shake_offset(t: f32) -> Option<f32> {
+    if !(0.0..SHAKE_SECS).contains(&t) {
+        return None;
+    }
+    let fade = 1.0 - t / SHAKE_SECS;
+    Some(SHAKE_AMPLITUDE * fade * (std::f32::consts::TAU * SHAKE_FREQUENCY * t).sin())
 }
 
 /// Cards currently picked up by the pointer.
@@ -272,6 +293,8 @@ fn deal(
                         target: start,
                         face_up: false,
                         height,
+                        shake_started: None,
+                        shake_offset: 0.0,
                     },
                     Transform::from_translation(start).with_rotation(card_rotation(false)),
                     Visibility::default(),
@@ -336,6 +359,7 @@ fn pointer_input(
     camera: Single<(&Camera, &GlobalTransform), With<TableCamera>>,
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
+    time: Res<Time>,
     entities: Res<CardEntities>,
     layout: Res<Layout>,
     mut table: ResMut<Table>,
@@ -402,7 +426,14 @@ fn pointer_input(
         let drag = pointer.drag.take().expect("checked above");
         if !drag.moved {
             // A tap: send the cards to the best place for them, if there is one.
-            table.0.auto_move(drag.from, drag.index);
+            if table.0.auto_move(drag.from, drag.index).is_none() {
+                // Nowhere to go: shake the cards.
+                for card in &drag.cards {
+                    if let Ok((_, mut view)) = cards.get_mut(entities.0[card]) {
+                        view.shake_started = Some(time.elapsed_secs());
+                    }
+                }
+            }
         } else if let Some(to) = layout.drop_target(&table.0, lead) {
             table.0.try_move(drag.from, drag.index, to);
         }
@@ -537,7 +568,9 @@ fn animate_cards(
         }
 
         let goal = to_table(view.target);
-        let mut position = to_table(transform.translation).lerp(goal, glide);
+        // Glide from where the card would be without last frame's shake.
+        let unshaken = to_table(transform.translation) - Vec2::new(view.shake_offset, 0.0);
+        let mut position = unshaken.lerp(goal, glide);
         if position.distance(goal) < 0.5 {
             position = goal;
         }
@@ -550,6 +583,35 @@ fn animate_cards(
         // While turning over, raise the card by enough that its edge clears the table.
         let tilt = transform.rotation.angle_between(card_rotation(true));
         let flip_lift = CARD_W / 2.0 * tilt.sin();
-        transform.translation = to_world(position, view.height + flip_lift);
+        let shake = view
+            .shake_started
+            .and_then(|start| shake_offset(time.elapsed_secs() - start));
+        if shake.is_none() {
+            view.shake_started = None;
+        }
+        view.shake_offset = shake.unwrap_or_default();
+        let shaken = position + Vec2::new(view.shake_offset, 0.0);
+        transform.translation = to_world(shaken, view.height + flip_lift);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shake_swings_both_ways_then_settles() {
+        let samples: Vec<f32> = (0..40)
+            .filter_map(|i| shake_offset(i as f32 * SHAKE_SECS / 40.0))
+            .collect();
+        assert_eq!(samples.len(), 40);
+        assert!(samples.iter().any(|&x| x > SHAKE_AMPLITUDE * 0.5));
+        assert!(samples.iter().any(|&x| x < -SHAKE_AMPLITUDE * 0.5));
+        assert!(samples.iter().all(|x| x.abs() <= SHAKE_AMPLITUDE));
+        // It dies away, and stops.
+        let late = shake_offset(SHAKE_SECS * 0.95).unwrap();
+        assert!(late.abs() < SHAKE_AMPLITUDE * 0.1);
+        assert_eq!(shake_offset(SHAKE_SECS), None);
+        assert_eq!(shake_offset(-0.1), None);
     }
 }
