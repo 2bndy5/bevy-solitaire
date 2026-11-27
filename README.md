@@ -1,7 +1,7 @@
 # Bevy Solitaire
 
 A collection of solitaire games made with [Bevy], played with 3D cards on a gently tilted table.
-So far it has Klondike (draw one), FreeCell, Golf and TriPeaks; more games are on the way.
+So far it has Klondike (draw one), FreeCell, Golf, TriPeaks and Pyramid; Spider is on the way.
 
 It grew out of [bevy-52-card-pickup], reusing its free
 [asset pack of hand-drawn cards][card-assets-link], card model, menus and build setup.
@@ -69,6 +69,18 @@ the source code and ways to support the project.
 - Cards turn face up once nothing covers them.
 - Tap the stock to turn its next card onto the waste. The stock is only gone through once.
 - Clear all three peaks to win.
+
+### Pyramid
+
+- A pyramid of 28 face-up cards, each row covering the bottom of the row behind it, and a stock.
+- Remove pairs of uncovered cards that add up to 13 (Jack = 11, Queen = 12, Ace = 1) by dragging
+  one onto the other. The top card of the waste counts as uncovered.
+- Kings are removed on their own.
+- Tap a card to remove it: a King on its own, any other card with the first uncovered card that makes
+  13 with it.
+- Tap the stock to turn its next card onto the waste; once it's empty, tap it again to turn the
+  waste back over.
+- Clear the pyramid to win.
 
 Your settings and saved games are kept in the browser's local storage on the web, or in a
 `bevy-solitaire` folder in your config folder on desktop.

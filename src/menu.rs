@@ -215,6 +215,8 @@ pub fn main_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
                         row.spawn(Node {
                             flex_basis: Val::Px(0.0),
                             flex_grow: 1.0,
+                            // As wide as a tile, padding included.
+                            padding: UiRect::horizontal(Val::Px(14.0)),
                             ..default()
                         });
                     }
