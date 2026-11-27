@@ -33,6 +33,10 @@ pub const REST_HEIGHT: f32 = 0.5;
 const CARD_GAP: f32 = 0.5;
 /// Height between overlapping levels of piles (see [`crate::game::Spot::level`]).
 const LEVEL_HEIGHT: f32 = 2.0;
+/// How far a selected card rises above its place.
+const SELECTED_LIFT: f32 = 15.0;
+/// How far (in table units) a selected card shifts away from the player.
+const SELECTED_SHIFT: f32 = 14.0;
 /// How far travelling cards rise, so they pass over resting cards.
 const TRAVEL_LIFT: f32 = 25.0;
 /// How long a card shakes when tapped with nowhere to go, in seconds.
@@ -143,6 +147,8 @@ struct Drag {
 #[derive(Resource, Default)]
 struct PointerState {
     drag: Option<Drag>,
+    /// The card tapped to be paired with the next one (see [`crate::game::Rules::selects_on_tap`]).
+    selected: Option<Card>,
 }
 
 impl PointerState {
@@ -428,6 +434,7 @@ fn pointer_input(
         match layout.hit_test(game, point) {
             Some((Pile::Stock, _)) => {
                 table.0.draw();
+                pointer.selected = None;
             }
             Some((pile, Some(index))) if game.can_pick_up(pile, index) => {
                 if let Some(drag_point) = on_plane(pos, DRAG_HEIGHT) {
@@ -469,7 +476,25 @@ fn pointer_input(
     if released.is_some() || !(mouse.pressed(MouseButton::Left) || touches.iter().next().is_some())
     {
         let drag = pointer.drag.take().expect("checked above");
-        if !drag.moved {
+        if !drag.moved && table.0.selects_on_tap(drag.from, drag.index) {
+            // A tap that selects: pair the card with the one already selected, or select it.
+            let tapped = drag.cards[0];
+            match pointer.selected.take() {
+                // Tapping the selected card again lets go of it.
+                Some(selected) if selected == tapped => {}
+                Some(selected) => {
+                    let paired = table
+                        .0
+                        .find(selected)
+                        .is_some_and(|(pile, index)| table.0.try_move(pile, index, drag.from));
+                    if !paired {
+                        pointer.selected = Some(tapped);
+                    }
+                }
+                None => pointer.selected = Some(tapped),
+            }
+        } else if !drag.moved {
+            pointer.selected = None;
             // A tap: send the cards to the best place for them, if there is one.
             if table.0.auto_move(drag.from, drag.index).is_none() {
                 // Nowhere to go: shake the cards.
@@ -482,8 +507,10 @@ fn pointer_input(
         } else {
             let game = &table.0;
             let accepts = |to| game.can_move(drag.from, drag.index, to);
-            if let Some(to) = layout.drop_target(game, lead, accepts) {
-                table.0.try_move(drag.from, drag.index, to);
+            if let Some(to) = layout.drop_target(game, lead, accepts)
+                && table.0.try_move(drag.from, drag.index, to)
+            {
+                pointer.selected = None;
             }
         }
         // Even if the move failed, the cards must glide back to their piles.
@@ -496,7 +523,7 @@ fn pointer_input(
 fn undo_input(
     mut requested: ResMut<UndoRequested>,
     keys: Res<ButtonInput<KeyCode>>,
-    pointer: Res<PointerState>,
+    mut pointer: ResMut<PointerState>,
     auto_finish: Res<AutoFinish>,
     mut table: ResMut<Table>,
 ) {
@@ -516,6 +543,7 @@ fn undo_input(
     if auto_finish.next_move_at.is_some() {
         return;
     }
+    pointer.selected = None;
     match request {
         Undo::Last if table.0.can_undo() => {
             table.0.undo();
@@ -599,8 +627,14 @@ fn sync_cards(
             };
             view.face_up = slot.face_up;
             if !pointer.is_dragging(&slot.card) {
-                let height = base + index as f32 * CARD_GAP;
-                view.target = to_world(layout.card_position(game, pile, index), height);
+                let mut height = base + index as f32 * CARD_GAP;
+                let mut position = layout.card_position(game, pile, index);
+                // A selected card pops up and away from its place.
+                if pointer.selected == Some(slot.card) {
+                    height += SELECTED_LIFT;
+                    position.y += SELECTED_SHIFT;
+                }
+                view.target = to_world(position, height);
             }
         }
     }

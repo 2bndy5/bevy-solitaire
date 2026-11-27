@@ -259,6 +259,12 @@ pub trait Rules: Sync {
     /// Has the game been won?
     fn is_won(&self, board: &Board) -> bool;
 
+    /// Should tapping the card at `index` in `from` select it, to be matched with the next card
+    /// tapped (Pyramid's pairs), rather than send it somewhere?
+    fn selects_on_tap(&self, _board: &Board, _from: Pile, _index: usize) -> bool {
+        false
+    }
+
     /// Is the game over without a win: no move left to make? Games where this is hard to tell
     /// (or never happens) say no.
     fn is_lost(&self, _board: &Board) -> bool {
@@ -416,6 +422,19 @@ impl Game {
             Some(Action::Move { from, index, to }) => self.try_move(from, index, to),
             None => false,
         }
+    }
+
+    /// Where `card` is: its pile and its index in the pile.
+    pub fn find(&self, card: Card) -> Option<(Pile, usize)> {
+        self.piles().find_map(|pile| {
+            let index = self.pile(pile).iter().position(|slot| slot.card == card)?;
+            Some((pile, index))
+        })
+    }
+
+    /// Should a tap on this card select it? See [`Rules::selects_on_tap`].
+    pub fn selects_on_tap(&self, from: Pile, index: usize) -> bool {
+        self.rules().selects_on_tap(&self.board, from, index)
     }
 
     /// Is there a move to undo?

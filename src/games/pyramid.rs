@@ -170,6 +170,11 @@ impl Rules for Pyramid {
         Self::free_piles(board).find(|&to| to != from && self.can_move(board, from, index, to))
     }
 
+    /// Every card but a King waits, selected, for its partner to be tapped.
+    fn selects_on_tap(&self, board: &Board, from: Pile, _index: usize) -> bool {
+        Self::free_card(board, from).is_some_and(|card| card.rank != Rank::King)
+    }
+
     fn is_won(&self, board: &Board) -> bool {
         all_cleared(board, Self::spots())
     }
@@ -266,6 +271,26 @@ mod tests {
         assert!(game.undo());
         assert_eq!(game.pile(Pile::Waste).len(), 1);
         assert_eq!(game.pile(Pile::Tableau(22)).len(), 1);
+    }
+
+    #[test]
+    fn taps_select_all_but_kings() {
+        let two = card(Rank::Two, Suit::Clubs);
+        let game = pyramid(
+            &[
+                (15, two),
+                (21, card(Rank::King, Suit::Hearts)),
+                (22, card(Rank::Jack, Suit::Spades)),
+            ],
+            &[],
+        );
+        assert!(game.selects_on_tap(Pile::Tableau(22), 0));
+        assert!(
+            !game.selects_on_tap(Pile::Tableau(21), 0),
+            "Kings go at once"
+        );
+        assert!(!game.selects_on_tap(Pile::Tableau(15), 0), "covered");
+        assert_eq!(game.find(two), Some((Pile::Tableau(15), 0)));
     }
 
     #[test]
