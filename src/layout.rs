@@ -29,6 +29,9 @@ pub struct Layout {
     pub face_down_offset: f32,
     /// Vertical fan offset below a face-up tableau card.
     pub face_up_offset: f32,
+    /// The longest a tableau fan may be (from its first card to its last). Longer fans are
+    /// squeezed to fit, so the table needn't leave room for the longest possible pile.
+    pub max_fan: f32,
     /// The area (centered on the table's origin) the camera keeps visible.
     pub size: Vec2,
     /// How far (in radians) the camera leans back from looking straight down.
@@ -42,17 +45,29 @@ impl Default for Layout {
 }
 
 impl Layout {
-    /// The layout for wide windows. Its size leaves room above the top row for the HUD.
+    /// The layout for wide windows.
+    ///
+    /// Window height is usually the limit here, so the table is only as tall as a typical deep
+    /// pile needs (6 face-down and 7 face-up cards); longer piles squeeze their fans.
     pub fn landscape() -> Self {
-        let column_spacing = 100.0;
-        let top_row_y = 270.0;
+        let column_spacing = 96.0;
+        let face_down_offset = 10.0;
+        let face_up_offset = 28.0;
+        let max_fan = 6.0 * face_down_offset + 6.0 * face_up_offset;
+        // From the top: room for the HUD, the top row, a gap, then the tableau and its fan.
+        let hud = 50.0;
+        let gap = 25.0;
+        let bottom_margin = 15.0;
+        let height = hud + CARD_H + gap + CARD_H + max_fan + bottom_margin;
+        let top_row_y = height / 2.0 - hud - CARD_H / 2.0;
         Self {
             column_spacing,
             top_row_y,
-            tableau_y: top_row_y - CARD_H - 30.0,
-            face_down_offset: 10.0,
-            face_up_offset: 28.0,
-            size: Vec2::new(7.0 * column_spacing + 40.0, 760.0) * 1.06,
+            tableau_y: top_row_y - CARD_H - gap,
+            face_down_offset,
+            face_up_offset,
+            max_fan,
+            size: Vec2::new(7.0 * column_spacing + 30.0, height) * 1.04,
             camera_tilt: 0.3,
         }
     }
@@ -72,13 +87,15 @@ impl Layout {
         let face_down_offset = 12.0;
         // Fit the worst case (6 face-down cards and a full King-to-Ace run) above the bottom.
         let bottom = -height / 2.0 + 0.04 * height;
-        let room = tableau_y - CARD_H / 2.0 - bottom - 6.0 * face_down_offset;
+        let max_fan = tableau_y - CARD_H / 2.0 - bottom;
+        let room = max_fan - 6.0 * face_down_offset;
         Self {
             column_spacing,
             top_row_y,
             tableau_y,
             face_down_offset,
             face_up_offset: (room / 12.0).clamp(28.0, 48.0),
+            max_fan,
             size: Vec2::new(width, height),
             // Less tilt than landscape: perspective shrinks the far (top) row, and on a narrow
             // screen every pixel of width counts.
@@ -114,20 +131,32 @@ impl Layout {
         let origin = self.pile_origin(pile);
         match pile {
             Pile::Tableau(_) => {
-                let fan: f32 = game.pile(pile)[..index]
-                    .iter()
-                    .map(|slot| {
-                        if slot.face_up {
-                            self.face_up_offset
-                        } else {
-                            self.face_down_offset
-                        }
-                    })
-                    .sum();
-                origin - Vec2::new(0.0, fan)
+                let faces: Vec<bool> = game.pile(pile).iter().map(|slot| slot.face_up).collect();
+                origin - Vec2::new(0.0, self.fan_offsets(&faces)[index])
             }
             _ => origin,
         }
+    }
+
+    /// How far below the first card each card of a tableau pile sits, given which cards are face
+    /// up (bottom card first). Fans longer than [`Layout::max_fan`] are squeezed evenly to fit.
+    pub fn fan_offsets(&self, face_up: &[bool]) -> Vec<f32> {
+        let mut offsets = Vec::with_capacity(face_up.len());
+        let mut fan = 0.0;
+        for &up in face_up {
+            offsets.push(fan);
+            fan += if up {
+                self.face_up_offset
+            } else {
+                self.face_down_offset
+            };
+        }
+        let length = offsets.last().copied().unwrap_or_default();
+        if length > self.max_fan {
+            let squeeze = self.max_fan / length;
+            offsets.iter_mut().for_each(|offset| *offset *= squeeze);
+        }
+        offsets
     }
 
     /// What is under `point`: a pile and, unless the pile is empty there, the index of the card.
@@ -204,7 +233,7 @@ mod tests {
         // On screen, a card's width is its share of the visible table width.
         let landscape_share = CARD_W / Layout::landscape().size.x;
         let portrait_share = CARD_W / Layout::portrait(PHONE).size.x;
-        assert!(portrait_share > landscape_share * 1.2);
+        assert!(portrait_share > landscape_share * 1.1);
         // And the fan of face-up cards uses the extra height.
         assert!(Layout::portrait(PHONE).face_up_offset > Layout::landscape().face_up_offset);
     }
@@ -255,13 +284,42 @@ mod tests {
     }
 
     #[test]
+    fn short_fans_are_not_squeezed() {
+        let layout = Layout::landscape();
+        let offsets = layout.fan_offsets(&[false, false, true, true]);
+        assert_eq!(offsets, [0.0, 10.0, 20.0, 48.0]);
+        assert!(layout.fan_offsets(&[]).is_empty());
+    }
+
+    #[test]
+    fn long_fans_are_squeezed_to_fit() {
+        let layout = Layout::landscape();
+        // Worst case: 6 face-down cards and a full King-to-Ace run.
+        let mut faces = vec![false; 6];
+        faces.extend([true; 13]);
+        let offsets = layout.fan_offsets(&faces);
+        assert!((offsets[18] - layout.max_fan).abs() < 0.01);
+        // Still in order, and face-up cards still further apart than face-down ones.
+        assert!(offsets.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(offsets[18] - offsets[17] > offsets[1] - offsets[0]);
+    }
+
+    #[test]
+    fn landscape_cards_are_bigger_on_wide_windows() {
+        // On a short, wide window the table's height is the limit, and a card's share of it
+        // decides its size on screen. The old landscape table was 806 units tall.
+        let share = CARD_H / Layout::landscape().size.y;
+        assert!(share > CARD_H / 806.0 * 1.3, "share = {share}");
+    }
+
+    #[test]
     fn deepest_tableau_fits_on_table() {
         for layout in layouts() {
             // Worst case: 6 face-down cards and a full King-to-Ace run.
-            let bottom = layout.tableau_y
-                - 6.0 * layout.face_down_offset
-                - 12.0 * layout.face_up_offset
-                - CARD_H / 2.0;
+            let mut faces = vec![false; 6];
+            faces.extend([true; 13]);
+            let fan = layout.fan_offsets(&faces)[18];
+            let bottom = layout.tableau_y - fan - CARD_H / 2.0;
             assert!(
                 bottom >= -layout.size.y / 2.0,
                 "{layout:?}: bottom = {bottom}"
