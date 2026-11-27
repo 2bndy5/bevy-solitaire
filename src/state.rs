@@ -14,4 +14,8 @@ pub enum GameState {
     Play,
     /// Win screen is being displayed.
     Win,
+    /// The best times screen is being displayed.
+    Stats,
+    /// The about screen is being displayed.
+    About,
 }

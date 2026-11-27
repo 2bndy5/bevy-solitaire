@@ -2,7 +2,7 @@
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
-    menu::{HomeButton, StartButton, button_node, font},
+    menu::{MenuAction, button_node, font},
     settings::SettingsButton,
     state::GameState,
     table::Table,
@@ -181,7 +181,7 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                             words: ""
                         },
                         button_font.clone(),
-                        HomeButton
+                        MenuAction::Home
                     ),
                     hud_button(
                         // embedded the FontAwesome cog icon via unicode code-point
@@ -208,7 +208,7 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
                             words: "New Game"
                         },
                         button_font,
-                        StartButton
+                        MenuAction::NewGame
                     ),
                 ],
             ),

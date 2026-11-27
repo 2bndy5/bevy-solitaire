@@ -11,5 +11,5 @@ rand = "0.10.1"
 [target.wasm32-unknown-unknown.dependencies]
 # spell-checker: disable-next-line 
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
-# Saving settings in the browser's local storage.
-web-sys = { version = "0.3", features = ["Window", "Storage"] }
+# Saving settings and games in the browser's local storage, and opening links.
+web-sys = { version = "0.3", features = ["Window", "Storage", "Location"] }
