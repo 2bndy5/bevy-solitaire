@@ -12,6 +12,8 @@ use crate::{
 
 /// Presses this close (in logical pixels) to the top of the window belong to the HUD.
 pub const HUD_HEIGHT_PX: f32 = 40.0;
+/// Room (in logical pixels) left at the bottom of the window for the hint banner.
+const BANNER_HEIGHT_PX: f32 = 56.0;
 /// A dropped card must land within this distance of a pile to be placed there.
 pub const DROP_DISTANCE: f32 = CARD_H * 0.75;
 /// Windows narrower than this (width / height) use the portrait layout.
@@ -65,7 +67,8 @@ impl Layout {
         // From the top: room for the HUD, the rows down to the fanned one, then its fans.
         let hud = 50.0;
         let gap = 25.0;
-        let bottom_margin = 15.0;
+        // Room for the hint banner (see `crate::hud`), so it doesn't cover cards.
+        let bottom_margin = 45.0;
         let row_spacing = CARD_H + gap;
         let height = hud + CARD_H + shape.fan_row * row_spacing + max_fan + bottom_margin;
         let top_row_y = height / 2.0 - hud - CARD_H / 2.0;
@@ -97,7 +100,8 @@ impl Layout {
         let row_spacing = CARD_H + 20.0;
         let fan_y = top_row_y - shape.fan_row * row_spacing;
         let face_down_offset = 12.0;
-        let bottom = -height / 2.0 + 0.04 * height;
+        // Leave room at the bottom for the hint banner (see `crate::hud`).
+        let bottom = -height / 2.0 + BANNER_HEIGHT_PX * units_per_px;
         let max_fan = fan_y - CARD_H / 2.0 - bottom;
         // Fit the fan the game asks for above the bottom.
         let (down, up) = shape.portrait_fan;

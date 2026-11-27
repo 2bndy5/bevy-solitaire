@@ -1,7 +1,7 @@
 # Bevy Solitaire
 
 A collection of solitaire games made with [Bevy], played with 3D cards on a gently tilted table.
-So far it has Klondike (draw one) and FreeCell; more games are on the way.
+So far it has Klondike (draw one), FreeCell and Golf; more games are on the way.
 
 It grew out of [bevy-52-card-pickup], reusing its free
 [asset pack of hand-drawn cards][card-assets-link], card model, menus and build setup.
@@ -15,6 +15,9 @@ light or dark) and four more card backs. They're drawn by [`tools/generate_decks
 Pick a game from the main menu. Your last game of each kind is saved as you play, so picking that
 game again carries on where you left off (the menu shows its moves and time). Press the house
 button in the top bar to return to the main menu at any time.
+
+Until your first move, a banner at the bottom sums up the game's rules. In games that can get stuck
+(like Golf), it tells you when no moves are left.
 
 Winning a game shows your five best times for that game; the main menu's "Best Times" button shows
 them for every game, with how many games you've won. "About" has the version, credits, a link to
@@ -48,6 +51,14 @@ the source code and ways to support the project.
 - Tap a card to send it to a foundation, else the next column that takes it, else an empty column,
   else a free cell.
 - Once every column runs downward in rank, the game finishes itself.
+
+### Golf
+
+- Seven columns of five face-up cards, a stock, and one card face up on the waste.
+- Tap (or drag) the top card of a column onto the waste if it is one rank above or below the waste's
+  top card, regardless of suit. Kings and Aces don't wrap around.
+- Tap the stock to turn its next card onto the waste. The stock is only gone through once.
+- Clear all seven columns to win; cards left in the stock don't matter.
 
 Your settings and saved games are kept in the browser's local storage on the web, or in a
 `bevy-solitaire` folder in your config folder on desktop.

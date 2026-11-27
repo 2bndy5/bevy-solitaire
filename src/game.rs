@@ -249,6 +249,12 @@ pub trait Rules: Sync {
     /// Has the game been won?
     fn is_won(&self, board: &Board) -> bool;
 
+    /// Is the game over without a win: no move left to make? Games where this is hard to tell
+    /// (or never happens) say no.
+    fn is_lost(&self, _board: &Board) -> bool {
+        false
+    }
+
     /// Is the game certain to be won from here, so it can finish itself?
     fn is_certainly_winnable(&self, _board: &Board) -> bool {
         false
@@ -379,6 +385,11 @@ impl Game {
         self.rules().is_won(&self.board)
     }
 
+    /// Is the game over without a win? See [`Rules::is_lost`].
+    pub fn is_lost(&self) -> bool {
+        !self.is_won() && self.rules().is_lost(&self.board)
+    }
+
     pub fn is_certainly_winnable(&self) -> bool {
         self.rules().is_certainly_winnable(&self.board)
     }
@@ -486,6 +497,12 @@ pub fn builds_down_alternating(top: &Slot, card: Card) -> bool {
         && card.rank.as_u8() + 1 == top.card.rank.as_u8()
 }
 
+/// Are `a` and `b` one rank apart (either way)? With `wrap`, Kings and Aces count as one apart.
+pub fn ranks_adjacent(a: Rank, b: Rank, wrap: bool) -> bool {
+    let difference = a.as_u8().abs_diff(b.as_u8());
+    difference == 1 || (wrap && difference == 12)
+}
+
 /// Are four foundations each full, from Ace to King?
 pub fn foundations_full(board: &Board, foundations: usize) -> bool {
     (0..foundations).all(|i| board.pile(Pile::Foundation(i)).len() == Rank::ALL.len())
@@ -500,6 +517,17 @@ pub fn card(rank: Rank, suit: crate::cards::Suit) -> Card {
 mod tests {
     use super::*;
     use crate::cards::{Suit, new_deck, shuffle_deck};
+
+    #[test]
+    fn adjacent_ranks() {
+        assert!(ranks_adjacent(Rank::Five, Rank::Six, false));
+        assert!(ranks_adjacent(Rank::Six, Rank::Five, false));
+        assert!(!ranks_adjacent(Rank::Six, Rank::Six, false));
+        assert!(!ranks_adjacent(Rank::King, Rank::Ace, false));
+        assert!(ranks_adjacent(Rank::King, Rank::Ace, true));
+        assert!(ranks_adjacent(Rank::Ace, Rank::King, true));
+        assert!(!ranks_adjacent(Rank::Queen, Rank::Ace, true));
+    }
 
     #[test]
     fn pile_keys_round_trip() {

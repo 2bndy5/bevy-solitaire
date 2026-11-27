@@ -2,6 +2,7 @@
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
+    game::Game,
     menu::{MenuAction, button_node, font},
     settings::SettingsButton,
     state::GameState,
@@ -115,6 +116,25 @@ fn hud_button(label: ResponsiveLabel, font: TextFont, marker: impl Bundle) -> im
 #[derive(Component)]
 struct ClockText;
 
+/// The banner along the bottom of the screen.
+#[derive(Component)]
+struct Banner;
+
+#[derive(Component)]
+struct BannerText;
+
+/// What the banner should say about `game`, if anything: the game's rules until the first move,
+/// and that it's stuck when it is.
+fn banner_message(game: &Game) -> Option<String> {
+    if game.is_lost() {
+        Some("No moves left. Undo, or start a new game.".to_string())
+    } else if game.moves == 0 {
+        Some(format!("{}: {}", game.kind.name(), game.kind.summary()))
+    } else {
+        None
+    }
+}
+
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
@@ -128,11 +148,41 @@ impl Plugin for HudPlugin {
                 Update,
                 (start_clock.run_if(in_state(GameState::Play)), update_hud).chain(),
             )
-            .add_systems(Update, fit_labels);
+            .add_systems(Update, (fit_labels, update_banner));
     }
 }
 
 fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
+    // A banner along the bottom for hints. See `update_banner`.
+    commands.spawn((
+        Banner,
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(12.0),
+            left: Val::Px(12.0),
+            right: Val::Px(12.0),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        Visibility::Hidden,
+        children![(
+            Node {
+                max_width: Val::Px(640.0),
+                padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
+                ..default()
+            },
+            BackgroundColor(Color::BLACK.with_alpha(0.7)),
+            children![(
+                Text::default(),
+                TextColor(Color::WHITE),
+                TextLayout::justify(Justify::Center),
+                font(&asset_server, 16.0),
+                BannerText,
+            )],
+        )],
+    ));
+
     let text_font = font(&asset_server, 20.0);
     let button_font = font(&asset_server, 18.0);
     commands.spawn((
@@ -230,6 +280,31 @@ fn fit_labels(
     }
 }
 
+/// Shows or hides the banner, and sets its text, while a game is being played.
+fn update_banner(
+    table: Res<Table>,
+    state: Res<State<GameState>>,
+    mut banner: Single<&mut Visibility, With<Banner>>,
+    mut text: Single<&mut Text, With<BannerText>>,
+) {
+    let message = (*state.get() == GameState::Play)
+        .then(|| banner_message(&table.0))
+        .flatten();
+    let visibility = if message.is_some() {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    if **banner != visibility {
+        **banner = visibility;
+    }
+    if let Some(message) = message
+        && text.0 != message
+    {
+        text.0 = message;
+    }
+}
+
 /// Starts the clock on the game's first move (or right away, for a resumed game).
 fn start_clock(table: Res<Table>, time: Res<Time>, mut clock: ResMut<GameClock>) {
     if clock.running_since.is_none() && table.0.moves > 0 {
@@ -263,6 +338,26 @@ fn update_hud(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn banner_explains_then_warns() {
+        use crate::{
+            cards::{Card, Rank, Suit, new_deck},
+            game::{Board, Pile, Slot},
+            games::GameKind,
+        };
+        let mut game = Game::deal(GameKind::Golf, new_deck());
+        assert!(banner_message(&game).unwrap().starts_with("Golf: "));
+        assert!(game.draw());
+        assert_eq!(banner_message(&game), None);
+
+        // A Nine with nothing left to draw and a Five on the waste: stuck.
+        let mut board = Board::new(GameKind::Golf.rules().piles());
+        *board.pile_mut(Pile::Waste) = vec![Slot::up(Card::new(Rank::Five, Suit::Hearts))];
+        *board.pile_mut(Pile::Tableau(0)) = vec![Slot::up(Card::new(Rank::Nine, Suit::Clubs))];
+        let stuck = Game::with_board(GameKind::Golf, board);
+        assert!(banner_message(&stuck).unwrap().starts_with("No moves left"));
+    }
 
     #[test]
     fn formats_durations() {
