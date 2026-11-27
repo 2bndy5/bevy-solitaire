@@ -6,12 +6,14 @@ mod golf;
 mod klondike;
 mod pyramid;
 mod rows;
+mod spider;
 mod tripeaks;
 
 pub use freecell::FreeCell;
 pub use golf::Golf;
 pub use klondike::Klondike;
 pub use pyramid::Pyramid;
+pub use spider::Spider;
 pub use tripeaks::TriPeaks;
 
 /// One of the games on offer.
@@ -23,16 +25,25 @@ pub enum GameKind {
     Golf,
     TriPeaks,
     Pyramid,
+    /// Spider with one suit.
+    Spider1,
+    /// Spider with two suits.
+    Spider2,
+    /// Spider with four suits.
+    Spider4,
 }
 
 impl GameKind {
     /// Every game, in the order the main menu lists them.
-    pub const ALL: [GameKind; 5] = [
+    pub const ALL: [GameKind; 8] = [
         GameKind::Klondike,
         GameKind::FreeCell,
         GameKind::Golf,
         GameKind::TriPeaks,
         GameKind::Pyramid,
+        GameKind::Spider1,
+        GameKind::Spider2,
+        GameKind::Spider4,
     ];
 
     /// The game's rules.
@@ -43,6 +54,9 @@ impl GameKind {
             GameKind::Golf => &Golf,
             GameKind::TriPeaks => &TriPeaks,
             GameKind::Pyramid => &Pyramid,
+            GameKind::Spider1 => &Spider { suits: 1 },
+            GameKind::Spider2 => &Spider { suits: 2 },
+            GameKind::Spider4 => &Spider { suits: 4 },
         }
     }
 
@@ -54,6 +68,9 @@ impl GameKind {
             GameKind::Golf => "golf",
             GameKind::TriPeaks => "tripeaks",
             GameKind::Pyramid => "pyramid",
+            GameKind::Spider1 => "spider1",
+            GameKind::Spider2 => "spider2",
+            GameKind::Spider4 => "spider4",
         }
     }
 
@@ -69,6 +86,9 @@ impl GameKind {
             GameKind::Golf => "Golf",
             GameKind::TriPeaks => "TriPeaks",
             GameKind::Pyramid => "Pyramid",
+            GameKind::Spider1 => "Spider (1 suit)",
+            GameKind::Spider2 => "Spider (2 suits)",
+            GameKind::Spider4 => "Spider (4 suits)",
         }
     }
 
@@ -94,6 +114,10 @@ impl GameKind {
             GameKind::Pyramid => {
                 "Clear the pyramid: drag an uncovered card onto another (or the waste) to remove \
                  pairs that add up to 13. Kings go on their own; J = 11, Q = 12."
+            }
+            GameKind::Spider1 | GameKind::Spider2 | GameKind::Spider4 => {
+                "Build down from King to Ace in one suit; complete runs leave the table. Any card \
+                 goes on one a rank higher. Tap the stock to deal a card onto every column."
             }
         }
     }
