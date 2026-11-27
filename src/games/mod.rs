@@ -2,9 +2,11 @@
 use crate::game::Rules;
 
 mod freecell;
+mod golf;
 mod klondike;
 
 pub use freecell::FreeCell;
+pub use golf::Golf;
 pub use klondike::Klondike;
 
 /// One of the games on offer.
@@ -13,17 +15,19 @@ pub enum GameKind {
     #[default]
     Klondike,
     FreeCell,
+    Golf,
 }
 
 impl GameKind {
     /// Every game, in the order the main menu lists them.
-    pub const ALL: [GameKind; 2] = [GameKind::Klondike, GameKind::FreeCell];
+    pub const ALL: [GameKind; 3] = [GameKind::Klondike, GameKind::FreeCell, GameKind::Golf];
 
     /// The game's rules.
     pub fn rules(self) -> &'static dyn Rules {
         match self {
             GameKind::Klondike => &Klondike,
             GameKind::FreeCell => &FreeCell,
+            GameKind::Golf => &Golf,
         }
     }
 
@@ -32,6 +36,7 @@ impl GameKind {
         match self {
             GameKind::Klondike => "klondike",
             GameKind::FreeCell => "freecell",
+            GameKind::Golf => "golf",
         }
     }
 
@@ -44,6 +49,7 @@ impl GameKind {
         match self {
             GameKind::Klondike => "Klondike",
             GameKind::FreeCell => "FreeCell",
+            GameKind::Golf => "Golf",
         }
     }
 
@@ -57,6 +63,10 @@ impl GameKind {
             GameKind::FreeCell => {
                 "Every card is dealt face up. Build the tableau down in alternating colors, using \
                  four free cells to hold single cards."
+            }
+            GameKind::Golf => {
+                "Clear the seven columns: play a top card onto the waste if it is one rank above \
+                 or below the waste's top card. Tap the stock for a new waste card."
             }
         }
     }
