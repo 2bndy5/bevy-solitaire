@@ -1,7 +1,7 @@
 # Bevy Solitaire
 
 A collection of solitaire games made with [Bevy], played with 3D cards on a gently tilted table.
-So far it has Klondike (draw one); more games are on the way.
+So far it has Klondike (draw one) and FreeCell; more games are on the way.
 
 It grew out of [bevy-52-card-pickup], reusing its free
 [asset pack of hand-drawn cards][card-assets-link], card model, menus and build setup.
@@ -36,6 +36,18 @@ the source code and ways to support the project.
 - The clock starts on your first move.
 - Press "New Game" at any time to deal again (this abandons the game in play).
 - Press the cog to choose the card art, table color and lighting.
+
+### FreeCell
+
+- Every card is dealt face up into eight columns.
+- Build the four foundations (top right) up by suit, from Ace to King.
+- Build the columns down in alternating colors. Any card may go in an empty column.
+- The four free cells (top left) each hold one card.
+- Only one card really moves at a time, so how long a run you can move at once depends on the room
+  to shuffle it through: one card per empty free cell, plus one, doubled for each empty column.
+- Tap a card to send it to a foundation, else the next column that takes it, else an empty column,
+  else a free cell.
+- Once every column runs downward in rank, the game finishes itself.
 
 Your settings and saved games are kept in the browser's local storage on the web, or in a
 `bevy-solitaire` folder in your config folder on desktop.

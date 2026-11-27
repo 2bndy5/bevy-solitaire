@@ -1,8 +1,10 @@
 //! The solitaire games on offer, each with its own [`Rules`].
 use crate::game::Rules;
 
+mod freecell;
 mod klondike;
 
+pub use freecell::FreeCell;
 pub use klondike::Klondike;
 
 /// One of the games on offer.
@@ -10,16 +12,18 @@ pub use klondike::Klondike;
 pub enum GameKind {
     #[default]
     Klondike,
+    FreeCell,
 }
 
 impl GameKind {
     /// Every game, in the order the main menu lists them.
-    pub const ALL: [GameKind; 1] = [GameKind::Klondike];
+    pub const ALL: [GameKind; 2] = [GameKind::Klondike, GameKind::FreeCell];
 
     /// The game's rules.
     pub fn rules(self) -> &'static dyn Rules {
         match self {
             GameKind::Klondike => &Klondike,
+            GameKind::FreeCell => &FreeCell,
         }
     }
 
@@ -27,6 +31,7 @@ impl GameKind {
     pub fn key(self) -> &'static str {
         match self {
             GameKind::Klondike => "klondike",
+            GameKind::FreeCell => "freecell",
         }
     }
 
@@ -38,6 +43,7 @@ impl GameKind {
     pub fn name(self) -> &'static str {
         match self {
             GameKind::Klondike => "Klondike",
+            GameKind::FreeCell => "FreeCell",
         }
     }
 
@@ -47,6 +53,10 @@ impl GameKind {
             GameKind::Klondike => {
                 "Build the foundations up by suit from Ace to King. Build the tableau down in \
                  alternating colors; draw from the stock one card at a time."
+            }
+            GameKind::FreeCell => {
+                "Every card is dealt face up. Build the tableau down in alternating colors, using \
+                 four free cells to hold single cards."
             }
         }
     }
