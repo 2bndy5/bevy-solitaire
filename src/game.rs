@@ -194,6 +194,15 @@ impl Spot {
     }
 }
 
+/// How the place of a pile is outlined on the table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outline {
+    /// A plain outline.
+    Plain,
+    /// An outline marked with an "A": a pile built up from Ace.
+    Ace,
+}
+
 /// The overall shape of a game's table, used to size the layout.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shape {
@@ -236,6 +245,14 @@ pub trait Rules: Sync {
 
     /// Where `pile` sits on the table.
     fn spot(&self, pile: Pile) -> Spot;
+
+    /// How `pile`'s place is outlined. Foundations are marked as built up from Ace.
+    fn outline(&self, pile: Pile) -> Outline {
+        match pile {
+            Pile::Foundation(_) => Outline::Ace,
+            _ => Outline::Plain,
+        }
+    }
 
     /// Draws from the stock, returning whether anything happened.
     fn draw(&self, _board: &mut Board) -> bool {

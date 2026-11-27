@@ -380,6 +380,20 @@ def make_back(back: Back) -> Image.Image:
     return image.resize((WIDTH, HEIGHT), Image.LANCZOS)
 
 
+def make_foundation_slot() -> Image.Image:
+    """A white slot with a faint border and a large "A": multiplied by the table's outline color,
+    it marks the piles that are built up from Ace."""
+    image = Image.new("RGB", (W, H), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    shade = (185, 185, 185)
+    inset = 14 * SCALE
+    draw.rounded_rectangle(
+        (inset, inset, W - inset, H - inset), radius=18 * SCALE, outline=shade, width=4 * SCALE
+    )
+    draw.text((W / 2, H / 2), "A", fill=shade, font=font(150 * SCALE), anchor="mm")
+    return image.resize((WIDTH, HEIGHT), Image.LANCZOS)
+
+
 def main() -> None:
     for deck in DECKS:
         out = ROOT / "assets" / "decks" / deck.name
@@ -393,6 +407,10 @@ def main() -> None:
     for back in BACKS:
         make_back(back).save(out / f"{back.name}.png", optimize=True)
         print(f"wrote {(out / back.name).relative_to(ROOT)}.png")
+    out = ROOT / "assets" / "slots"
+    out.mkdir(parents=True, exist_ok=True)
+    make_foundation_slot().save(out / "foundation.png", optimize=True)
+    print(f"wrote {(out / 'foundation.png').relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

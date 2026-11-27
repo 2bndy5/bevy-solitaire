@@ -1,7 +1,7 @@
 //! Pyramid: clear a pyramid of cards by removing pairs that add up to 13, and Kings on their own.
 use crate::{
     cards::{Card, Rank},
-    game::{Board, Pile, Rules, Shape, Slot, Spot},
+    game::{Board, Outline, Pile, Rules, Shape, Slot, Spot},
     games::rows::{RowSpots, all_cleared, is_exposed, piles_front_first},
 };
 
@@ -90,6 +90,11 @@ impl Rules for Pyramid {
             board.pile_mut(Pile::Tableau(index)).push(Slot::up(card));
         }
         *board.pile_mut(Pile::Stock) = deck.into_iter().map(Slot::down).collect();
+    }
+
+    /// The discard pile takes any card, so it isn't marked as built up from Ace.
+    fn outline(&self, _pile: Pile) -> Outline {
+        Outline::Plain
     }
 
     fn shape(&self) -> Shape {

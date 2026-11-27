@@ -9,7 +9,8 @@ It grew out of [bevy-52-card-pickup], reusing its free
 
 Besides those hand-drawn cards, the settings offer four more decks (Modern and Large print, each
 light or dark) and four more card backs. They're drawn by [`tools/generate_decks.py`](tools/generate_decks.py)
-(Python with Pillow) from vector shapes; re-run it from the repository root after changing it.
+(Python with Pillow) from vector shapes, along with the "A" that marks foundation outlines
+(`assets/slots/foundation.png`); re-run it from the repository root after changing it.
 
 ## How to play
 

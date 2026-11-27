@@ -2,7 +2,7 @@
 //! which leave the table when complete.
 use crate::{
     cards::{Card, Rank, Suit},
-    game::{Board, Pile, Rules, Shape, Slot, Spot},
+    game::{Board, Outline, Pile, Rules, Shape, Slot, Spot},
 };
 
 const TABLEAUS: usize = 10;
@@ -90,6 +90,12 @@ impl Rules for Spider {
             board.turn_up_top(Pile::Tableau(column));
         }
         *board.pile_mut(Pile::Stock) = deck.into_iter().map(Slot::down).collect();
+    }
+
+    /// Spider's foundations take whole runs, King first, so they aren't marked as built up from
+    /// Ace.
+    fn outline(&self, _pile: Pile) -> Outline {
+        Outline::Plain
     }
 
     fn shape(&self) -> Shape {

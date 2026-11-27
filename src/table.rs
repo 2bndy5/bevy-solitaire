@@ -7,7 +7,7 @@ use bevy::{platform::collections::HashMap, prelude::*, window::PrimaryWindow};
 use crate::{
     cards::{CARD_H, CARD_W, Card},
     celebrate::Flying,
-    game::{Game, Pile},
+    game::{Game, Outline, Pile},
     games::GameKind,
     hud::{GameClock, Undo, UndoRequested},
     layout::{HUD_HEIGHT_PX, Layout},
@@ -77,6 +77,8 @@ struct CardAssets {
     back: Handle<StandardMaterial>,
     faces: HashMap<Card, Handle<StandardMaterial>>,
     slot: Handle<StandardMaterial>,
+    /// The outline of a pile built up from Ace, marked with an "A".
+    ace_slot: Handle<StandardMaterial>,
 }
 
 /// Maps each card to the entity that renders it.
@@ -232,6 +234,12 @@ fn load_card_assets(
             perceptual_roughness: 1.0,
             ..default()
         }),
+        ace_slot: materials.add(StandardMaterial {
+            base_color: settings.table.outline(),
+            base_color_texture: Some(asset_server.load("slots/foundation.png")),
+            perceptual_roughness: 1.0,
+            ..default()
+        }),
     });
 }
 
@@ -253,8 +261,10 @@ fn apply_settings(
             face.base_color_texture = Some(asset_server.load(settings.deck.face_path(card)));
         }
     }
-    if let Some(mut slot) = materials.get_mut(&assets.slot) {
-        slot.base_color = settings.table.outline();
+    for slot in [&assets.slot, &assets.ace_slot] {
+        if let Some(mut slot) = materials.get_mut(slot) {
+            slot.base_color = settings.table.outline();
+        }
     }
 }
 
@@ -319,7 +329,10 @@ fn deal(
         commands.spawn((
             PileOutline(pile),
             Mesh3d(assets.mesh.clone()),
-            MeshMaterial3d(assets.slot.clone()),
+            MeshMaterial3d(match table.0.rules().outline(pile) {
+                Outline::Plain => assets.slot.clone(),
+                Outline::Ace => assets.ace_slot.clone(),
+            }),
             Transform::from_translation(to_world(layout.pile_origin(pile), 0.1))
                 .with_rotation(card_rotation(true))
                 .with_scale(Vec3::new(0.95, 0.96, 1.0)),
