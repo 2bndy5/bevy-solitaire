@@ -37,21 +37,32 @@ SUITS = {"c": "Clubs", "d": "Diamonds", "h": "Hearts", "s": "Spades"}
 
 RED = (200, 16, 46)
 BLACK = (26, 26, 30)
-BLUE = (21, 101, 192)
-GREEN = (46, 125, 50)
+# For dark cards: light enough to read on charcoal, still clearly two different colors.
+CORAL = (255, 112, 104)
+ICE = (222, 230, 240)
+DARK_PAPER = (38, 40, 46, 255)
+DARK_EDGE = (78, 82, 92, 255)
 
 
 @dataclass
 class Deck:
     name: str
-    colors: dict[str, tuple[int, int, int]]
+    # Two colors, as in a traditional deck: one for hearts and diamonds, one for clubs and spades.
+    red: tuple[int, int, int]
+    black: tuple[int, int, int]
     large_print: bool = False
+    paper: tuple[int, int, int, int] = PAPER
+    edge: tuple[int, int, int, int] = EDGE
+
+    def color(self, suit: str) -> tuple[int, int, int]:
+        return self.red if suit in "hd" else self.black
 
 
 DECKS = [
-    Deck("modern", {"c": BLACK, "d": RED, "h": RED, "s": BLACK}),
-    Deck("four-color", {"c": GREEN, "d": BLUE, "h": RED, "s": BLACK}),
-    Deck("large-print", {"c": GREEN, "d": BLUE, "h": RED, "s": BLACK}, large_print=True),
+    Deck("modern", RED, BLACK),
+    Deck("large-print", RED, BLACK, large_print=True),
+    Deck("modern-dark", CORAL, ICE, paper=DARK_PAPER, edge=DARK_EDGE),
+    Deck("large-print-dark", CORAL, ICE, large_print=True, paper=DARK_PAPER, edge=DARK_EDGE),
 ]
 
 
@@ -131,13 +142,13 @@ def draw_suit(draw: ImageDraw.ImageDraw, suit: str, cx: float, cy: float, size: 
 # --- Card faces ----------------------------------------------------------------------------------
 
 
-def blank_card() -> tuple[Image.Image, ImageDraw.ImageDraw]:
+def blank_card(paper=PAPER, edge=EDGE) -> tuple[Image.Image, ImageDraw.ImageDraw]:
     image = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((0, 0, W - 1, H - 1), RADIUS, fill=EDGE)
+    draw.rounded_rectangle((0, 0, W - 1, H - 1), RADIUS, fill=edge)
     border = 3 * SCALE
     draw.rounded_rectangle((border, border, W - 1 - border, H - 1 - border), RADIUS - border,
-                           fill=PAPER)
+                           fill=paper)
     return image, draw
 
 
@@ -152,7 +163,7 @@ def draw_index(image: Image.Image, rank: str, suit: str, color, large: bool,
     corner = Image.new("RGBA", (W // 2, H // 2), (0, 0, 0, 0))
     draw = ImageDraw.Draw(corner)
     rank_size = (0.25 if large else 0.135) * H
-    suit_size = (0.15 if large else 0.075) * H
+    suit_size = (0.17 if large else 0.095) * H
     left = 0.085 * W if large else 0.07 * W
     text_font = font(rank_size)
     # "10" is squeezed a little so it is no wider than other ranks.
@@ -164,7 +175,7 @@ def draw_index(image: Image.Image, rank: str, suit: str, color, large: bool,
     top = 0.04 * H
     draw.text((center_x, top), rank, font=text_font, fill=color, anchor="mt")
     rank_bottom = top + rank_size * 0.78
-    draw_suit(draw, suit, center_x, rank_bottom + suit_size * 0.62, suit_size, color)
+    draw_suit(draw, suit, center_x, rank_bottom + suit_size * 0.6, suit_size, color)
     image.alpha_composite(corner, (0, 0))
     if mirrored:
         image.alpha_composite(corner.rotate(180), (W - W // 2, H - H // 2))
@@ -178,8 +189,8 @@ def draw_small_bottom_index(image: Image.Image, rank: str, suit: str, color) -> 
 
 
 # Pip positions as (column, row) fractions of the card; rows below the middle are drawn flipped.
-L, C, R = 0.34, 0.5, 0.66
-T, B = 0.2, 0.8
+L, C, R = 0.345, 0.5, 0.655
+T, B = 0.215, 0.785
 PIPS = {
     "2": [(C, T), (C, B)],
     "3": [(C, T), (C, 0.5), (C, B)],
@@ -195,18 +206,19 @@ PIPS = {
 
 
 def draw_pips(draw: ImageDraw.ImageDraw, rank: str, suit: str, color) -> None:
-    size = 0.115 * H
+    # Big pips, a little smaller on the busiest cards so they don't touch.
+    size = (0.115 if rank in ("9", "10") else 0.13) * H
     for x, y in PIPS[rank]:
         draw_suit(draw, suit, x * W, y * H, size, color, flip=y > 0.5)
 
 
 def draw_ace(draw: ImageDraw.ImageDraw, suit: str, color) -> None:
-    draw_suit(draw, suit, W / 2, H / 2, 0.42 * H, color)
+    draw_suit(draw, suit, W / 2, H / 2, 0.5 * H, color)
 
 
-def tint(color, amount: float):
-    """Mixes `color` toward the paper color by `amount` (0 = color, 1 = paper)."""
-    return tuple(int(c + (p - c) * amount) for c, p in zip(color, PAPER[:3])) + (255,)
+def tint(color, amount: float, paper=PAPER):
+    """Mixes `color` toward the `paper` color by `amount` (0 = color, 1 = paper)."""
+    return tuple(int(c + (p - c) * amount) for c, p in zip(color, paper[:3])) + (255,)
 
 
 def crown(draw: ImageDraw.ImageDraw, cx: float, base: float, width: float, points: int, color,
@@ -243,21 +255,21 @@ def cap(draw: ImageDraw.ImageDraw, cx: float, base: float, width: float, color, 
     draw.ellipse((cx - r, top - r, cx + r, top + r), fill=color)
 
 
-def draw_court(image: Image.Image, rank: str, suit: str, color) -> None:
+def draw_court(image: Image.Image, rank: str, suit: str, color, paper) -> None:
     """A two-ended court card: a crown (or cap), the rank's letter and a tinted suit emblem."""
     draw = ImageDraw.Draw(image)
     # The frame.
     left, top, right, bottom = 0.25 * W, 0.08 * H, 0.75 * W, 0.92 * H
-    draw.rounded_rectangle((left, top, right, bottom), 14 * SCALE, fill=tint(color, 0.88),
-                           outline=color, width=3 * SCALE)
-    draw.line((left + 10 * SCALE, H / 2, right - 10 * SCALE, H / 2), fill=tint(color, 0.5),
-              width=2 * SCALE)
+    draw.rounded_rectangle((left, top, right, bottom), 14 * SCALE,
+                           fill=tint(color, 0.88, paper), outline=color, width=3 * SCALE)
+    draw.line((left + 10 * SCALE, H / 2, right - 10 * SCALE, H / 2),
+              fill=tint(color, 0.5, paper), width=2 * SCALE)
     gold = (232, 183, 58, 255)
     # Draw the top half, then copy it upside down onto the bottom half.
     half = Image.new("RGBA", (W, H // 2), (0, 0, 0, 0))
     half_draw = ImageDraw.Draw(half)
     middle_x = W / 2
-    draw_suit(half_draw, suit, middle_x, 0.36 * H, 0.18 * H, tint(color, 0.6))
+    draw_suit(half_draw, suit, middle_x, 0.365 * H, 0.24 * H, tint(color, 0.6, paper))
     letter_font = font(0.18 * H)
     half_draw.text((middle_x, 0.36 * H), rank, font=letter_font, fill=color, anchor="mm")
     crown_width = 0.28 * W
@@ -272,20 +284,21 @@ def draw_court(image: Image.Image, rank: str, suit: str, color) -> None:
     image.alpha_composite(half.rotate(180), (0, H - H // 2))
 
 
-def draw_large_print_center(draw: ImageDraw.ImageDraw, rank: str, suit: str, color) -> None:
+def draw_large_print_center(draw: ImageDraw.ImageDraw, rank: str, suit: str, color,
+                            paper) -> None:
     """Large-print cards show one big suit (and, for courts, the letter) below the index."""
     if rank in ("J", "Q", "K"):
-        draw.text((W * 0.5, H * 0.62), rank, font=font(0.34 * H), fill=tint(color, 0.35),
+        draw.text((W * 0.5, H * 0.62), rank, font=font(0.36 * H), fill=tint(color, 0.35, paper),
                   anchor="mm")
     else:
-        draw_suit(draw, suit, W * 0.5, H * 0.62, 0.3 * H, color)
+        draw_suit(draw, suit, W * 0.5, H * 0.63, 0.38 * H, color)
 
 
 def make_face(deck: Deck, rank: str, suit: str) -> Image.Image:
-    image, draw = blank_card()
-    color = deck.colors[suit] + (255,)
+    image, draw = blank_card(deck.paper, deck.edge)
+    color = deck.color(suit) + (255,)
     if deck.large_print:
-        draw_large_print_center(draw, rank, suit, color)
+        draw_large_print_center(draw, rank, suit, color, deck.paper)
         # Only the top-left index is big: it's the part that shows in a fanned pile.
         draw_index(image, rank, suit, color, large=True, mirrored=False)
         draw_small_bottom_index(image, rank, suit, color)
@@ -293,7 +306,7 @@ def make_face(deck: Deck, rank: str, suit: str) -> Image.Image:
         if rank == "A":
             draw_ace(draw, suit, color)
         elif rank in ("J", "Q", "K"):
-            draw_court(image, rank, suit, color)
+            draw_court(image, rank, suit, color, deck.paper)
         else:
             draw_pips(draw, rank, suit, color)
         draw_index(image, rank, suit, color, large=False)
@@ -309,17 +322,20 @@ class Back:
     base: tuple[int, int, int]
     accent: tuple[int, int, int]
     pattern: str
+    # Dark backs get a dark border, to match the dark decks.
+    dark: bool = False
 
 
 BACKS = [
     Back("teal-lattice", (14, 98, 104), (120, 200, 196), "lattice"),
     Back("crimson-weave", (128, 20, 36), (232, 120, 120), "weave"),
     Back("midnight-stars", (18, 24, 58), (236, 214, 140), "stars"),
+    Back("graphite", (40, 42, 48), (98, 104, 116), "lattice", dark=True),
 ]
 
 
 def make_back(back: Back) -> Image.Image:
-    image, draw = blank_card()
+    image, draw = blank_card(DARK_PAPER, DARK_EDGE) if back.dark else blank_card()
     margin = 0.055 * W
     inner = (margin, margin, W - margin, H - margin)
     panel = Image.new("RGBA", (W, H), (0, 0, 0, 0))
