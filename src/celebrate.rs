@@ -12,6 +12,7 @@ use crate::{
     layout::HUD_HEIGHT_PX,
     menu::spawn_win_overlay,
     state::GameState,
+    stats::LastWin,
     table::{CardEntities, REST_HEIGHT, Table, card_rotation},
 };
 
@@ -173,6 +174,7 @@ fn show_overlay(
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
     window: Single<&Window, With<PrimaryWindow>>,
+    last_win: Res<LastWin>,
     mut celebration: ResMut<Celebration>,
 ) {
     let now = time.elapsed_secs_f64();
@@ -193,7 +195,13 @@ fn show_overlay(
     }
     celebration.overlay_at = Some(f64::INFINITY);
     let time_played = format_duration(clock.elapsed(now));
-    spawn_win_overlay(&mut commands, &asset_server, table.0.moves, &time_played);
+    spawn_win_overlay(
+        &mut commands,
+        &asset_server,
+        table.0.moves,
+        &time_played,
+        &last_win,
+    );
 }
 
 #[cfg(test)]

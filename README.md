@@ -16,6 +16,10 @@ Pick a game from the main menu. Your last game of each kind is saved as you play
 game again carries on where you left off (the menu shows its moves and time). Press the house
 button in the top bar to return to the main menu at any time.
 
+Winning a game shows your five best times for that game; the main menu's "Best Times" button shows
+them for every game, with how many games you've won. "About" has the version, credits, a link to
+the source code and ways to support the project.
+
 ### Klondike
 
 - Build the four foundations (top right) up by suit, from Ace to King.
@@ -72,8 +76,10 @@ Run the tests for the game rules with `cargo test`.
 | `src/table.rs`  | Bevy systems: dealing, card animation, dragging and the HUD.            |
 | `src/hud.rs`    | Move count, game clock, and the Home, Settings, Undo and New Game buttons. |
 | `src/celebrate.rs` | The win celebration.                                                 |
-| `src/menu.rs`   | The main menu and the win screen.                                       |
+| `src/menu.rs`   | The main menu, and the win, best times and about screens.              |
 | `src/progress.rs` | Saving and resuming the last game of each kind.                       |
+| `src/stats.rs`  | Games won and the five best times for each game.                        |
+| `src/links.rs`  | Buttons that open web pages.                                            |
 | `src/storage.rs` | Saving text in local storage (web) or the config folder (desktop).     |
 | `src/settings.rs` | Settings (card art, table color, lighting), saving them, and their panel. |
 
