@@ -42,6 +42,9 @@ pub struct Layout {
     pub size: Vec2,
     /// How far (in radians) the camera leans back from looking straight down.
     pub camera_tilt: f32,
+    /// Whether the piles outside the tableau (the stock, waste, foundations, cells) are mirrored
+    /// left to right, for players who'd rather have the stock on the right.
+    pub mirrored: bool,
 }
 
 impl Default for Layout {
@@ -79,6 +82,7 @@ impl Layout {
             max_fan,
             size: Vec2::new(shape.columns as f32 * column_spacing + 30.0, height) * 1.04,
             camera_tilt: 0.3,
+            mirrored: false,
         }
     }
 
@@ -114,6 +118,7 @@ impl Layout {
             // Less tilt than landscape: perspective shrinks the far (top) row, and on a narrow
             // screen every pixel of width counts.
             camera_tilt: 0.15,
+            mirrored: false,
         }
     }
 
@@ -131,11 +136,22 @@ impl Layout {
         (column - (columns - 1.0) / 2.0) * self.column_spacing
     }
 
+    /// This layout, with the piles outside the tableau mirrored if `mirrored`.
+    pub fn with_mirror(self, mirrored: bool) -> Self {
+        Self { mirrored, ..self }
+    }
+
     /// Center of an empty `pile` (where its bottom card goes).
     pub fn pile_origin(&self, pile: Pile) -> Vec2 {
         let spot = self.kind.rules().spot(pile);
+        let column = if self.mirrored && !matches!(pile, Pile::Tableau(_)) {
+            let columns = self.kind.rules().shape().columns as f32;
+            columns - 1.0 - spot.column
+        } else {
+            spot.column
+        };
         Vec2::new(
-            self.column_x(spot.column),
+            self.column_x(column),
             self.top_row_y - spot.row * self.row_spacing,
         )
     }
@@ -339,6 +355,26 @@ mod tests {
                 Some(Pile::Tableau(3))
             );
         }
+    }
+
+    #[test]
+    fn mirroring_swaps_the_top_row_but_not_the_tableau() {
+        let layout = Layout::landscape(KLONDIKE);
+        let mirrored = layout.with_mirror(true);
+        assert_eq!(
+            mirrored.pile_origin(Pile::Stock),
+            layout.pile_origin(Pile::Foundation(3))
+        );
+        assert_eq!(
+            mirrored.pile_origin(Pile::Foundation(0)),
+            layout
+                .pile_origin(Pile::Tableau(3))
+                .with_y(layout.top_row_y)
+        );
+        assert_eq!(
+            mirrored.pile_origin(Pile::Tableau(0)),
+            layout.pile_origin(Pile::Tableau(0))
+        );
     }
 
     #[test]

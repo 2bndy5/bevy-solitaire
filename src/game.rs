@@ -282,6 +282,11 @@ pub trait Rules: Sync {
         false
     }
 
+    /// Do taps ever select cards in this game (see [`Rules::selects_on_tap`])?
+    fn any_tap_selects(&self) -> bool {
+        false
+    }
+
     /// Is the game over without a win: no move left to make? Games where this is hard to tell
     /// (or never happens) say no.
     fn is_lost(&self, _board: &Board) -> bool {

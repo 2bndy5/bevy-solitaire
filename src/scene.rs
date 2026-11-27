@@ -9,7 +9,12 @@ use bevy::{
     light::CascadeShadowConfigBuilder, prelude::*, render::view::Tonemapping, window::PrimaryWindow,
 };
 
-use crate::{layout::Layout, settings::Settings, state::GameState, table::Table};
+use crate::{
+    layout::Layout,
+    settings::{Settings, StockSide},
+    state::GameState,
+    table::Table,
+};
 
 /// The camera's vertical field of view. Narrow, to keep perspective distortion gentle.
 const CAMERA_FOV: f32 = FRAC_PI_6;
@@ -132,6 +137,7 @@ fn camera_transform(distance: f32, tilt: f32) -> Transform {
 fn fit_to_window(
     window: Single<Ref<Window>, With<PrimaryWindow>>,
     table: Res<Table>,
+    settings: Res<Settings>,
     mut layout: ResMut<Layout>,
     mut camera: Single<&mut Transform, With<TableCamera>>,
 ) {
@@ -139,7 +145,8 @@ fn fit_to_window(
     if size.x <= 0.0 || size.y <= 0.0 {
         return;
     }
-    let new_layout = Layout::for_window(table.0.kind, size);
+    let mirrored = settings.stock_side == StockSide::Right;
+    let new_layout = Layout::for_window(table.0.kind, size).with_mirror(mirrored);
     if *layout != new_layout {
         *layout = new_layout;
     }

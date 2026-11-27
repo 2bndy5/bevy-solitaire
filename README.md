@@ -44,7 +44,8 @@ the source code and ways to support the project.
 - Once the stock is empty and every tableau card is face up, the game finishes itself.
 - The clock starts on your first move.
 - Press "New Game" at any time to deal again (this abandons the game in play).
-- Press the cog to choose the card art, table color and lighting.
+- Press the cog to choose the card art, table color, lighting, and which side the stock sits on
+  (the foundations and other top-row piles swap sides with it, in every game).
 
 ### FreeCell
 

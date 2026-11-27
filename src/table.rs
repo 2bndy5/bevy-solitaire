@@ -14,7 +14,7 @@ use crate::{
     menu::Popup,
     progress,
     scene::{TableCamera, pointer_on_plane, to_table, to_world},
-    settings::{Settings, SettingsPanel},
+    settings::{Settings, SettingsPanel, StockSide},
     state::GameState,
 };
 
@@ -294,6 +294,7 @@ fn deal(
     window: Single<&Window, With<PrimaryWindow>>,
     assets: Res<CardAssets>,
     next: Res<NextDeal>,
+    settings: Res<Settings>,
     mut layout: ResMut<Layout>,
     mut table: ResMut<Table>,
     mut clock: ResMut<GameClock>,
@@ -320,7 +321,8 @@ fn deal(
     };
     table.0 = game;
     *clock = GameClock::resumed(seconds);
-    let new_layout = Layout::for_window(kind, window.size());
+    let mirrored = settings.stock_side == StockSide::Right;
+    let new_layout = Layout::for_window(kind, window.size()).with_mirror(mirrored);
     if *layout != new_layout {
         *layout = new_layout;
     }

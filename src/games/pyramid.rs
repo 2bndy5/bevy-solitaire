@@ -180,6 +180,10 @@ impl Rules for Pyramid {
         Self::free_card(board, from).is_some_and(|card| card.rank != Rank::King)
     }
 
+    fn any_tap_selects(&self) -> bool {
+        true
+    }
+
     fn is_won(&self, board: &Board) -> bool {
         all_cleared(board, Self::spots())
     }
