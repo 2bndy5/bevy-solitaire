@@ -4,12 +4,14 @@ use crate::game::Rules;
 mod freecell;
 mod golf;
 mod klondike;
+mod pyramid;
 mod rows;
 mod tripeaks;
 
 pub use freecell::FreeCell;
 pub use golf::Golf;
 pub use klondike::Klondike;
+pub use pyramid::Pyramid;
 pub use tripeaks::TriPeaks;
 
 /// One of the games on offer.
@@ -20,15 +22,17 @@ pub enum GameKind {
     FreeCell,
     Golf,
     TriPeaks,
+    Pyramid,
 }
 
 impl GameKind {
     /// Every game, in the order the main menu lists them.
-    pub const ALL: [GameKind; 4] = [
+    pub const ALL: [GameKind; 5] = [
         GameKind::Klondike,
         GameKind::FreeCell,
         GameKind::Golf,
         GameKind::TriPeaks,
+        GameKind::Pyramid,
     ];
 
     /// The game's rules.
@@ -38,6 +42,7 @@ impl GameKind {
             GameKind::FreeCell => &FreeCell,
             GameKind::Golf => &Golf,
             GameKind::TriPeaks => &TriPeaks,
+            GameKind::Pyramid => &Pyramid,
         }
     }
 
@@ -48,6 +53,7 @@ impl GameKind {
             GameKind::FreeCell => "freecell",
             GameKind::Golf => "golf",
             GameKind::TriPeaks => "tripeaks",
+            GameKind::Pyramid => "pyramid",
         }
     }
 
@@ -62,6 +68,7 @@ impl GameKind {
             GameKind::FreeCell => "FreeCell",
             GameKind::Golf => "Golf",
             GameKind::TriPeaks => "TriPeaks",
+            GameKind::Pyramid => "Pyramid",
         }
     }
 
@@ -83,6 +90,10 @@ impl GameKind {
             GameKind::TriPeaks => {
                 "Clear the three peaks: play an uncovered card onto the waste if it is one rank \
                  above or below the waste's top card (King and Ace connect)."
+            }
+            GameKind::Pyramid => {
+                "Clear the pyramid: drag an uncovered card onto another (or the waste) to remove \
+                 pairs that add up to 13. Kings go on their own; J = 11, Q = 12."
             }
         }
     }
