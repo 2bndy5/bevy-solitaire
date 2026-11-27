@@ -101,7 +101,8 @@ the source code and ways to support the project.
   can't deal while a column is empty.
 - Tap a run to move it onto the next column with a card one rank higher, preferring one of the same
   suit; failing that, into an empty column.
-- Clear all eight runs to win.
+- Clear all eight runs to win. Once the stock is empty and every column is a single run of one suit,
+  the game finishes itself.
 
 Your settings and saved games are kept in the browser's local storage on the web, or in a
 `bevy-solitaire` folder in your config folder on desktop.

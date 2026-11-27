@@ -2,7 +2,7 @@
 //! which leave the table when complete.
 use crate::{
     cards::{Card, Rank, Suit},
-    game::{Board, Outline, Pile, Rules, Shape, Slot, Spot},
+    game::{Action, Board, Outline, Pile, Rules, Shape, Slot, Spot},
 };
 
 const TABLEAUS: usize = 10;
@@ -193,6 +193,40 @@ impl Rules for Spider {
     fn is_won(&self, board: &Board) -> bool {
         (0..FOUNDATIONS).all(|i| board.pile(Pile::Foundation(i)).len() == Rank::ALL.len())
     }
+
+    /// Once the stock is empty and every column is a single face-up run of one suit, the runs can
+    /// always be joined up into complete ones.
+    ///
+    /// A run that doesn't start with a King needs a card one rank higher of its suit on top of
+    /// another column. There is always one: of the copies of that card left on the table, one can
+    /// only be covered by a copy of the run's first card, and that copy is at the bottom of its
+    /// column instead.
+    fn is_certainly_winnable(&self, board: &Board) -> bool {
+        board.pile(Pile::Stock).is_empty()
+            && (0..TABLEAUS)
+                .map(Pile::Tableau)
+                .filter(|&column| !board.pile(column).is_empty())
+                .all(|column| Self::is_run(board, column, 0))
+    }
+
+    /// Moves a whole column onto the column whose top card is one rank higher and of its suit.
+    fn auto_finish_step(&self, board: &Board) -> Option<Action> {
+        let columns = || (0..TABLEAUS).map(Pile::Tableau);
+        columns().find_map(|from| {
+            let bottom = board.pile(from).first()?.card;
+            if bottom.rank == Rank::King {
+                return None;
+            }
+            let to = columns().find(|&to| {
+                to != from
+                    && board.top(to).is_some_and(|top| {
+                        top.card.suit == bottom.suit
+                            && top.card.rank.as_u8() == bottom.rank.as_u8() + 1
+                    })
+            })?;
+            Some(Action::Move { from, index: 0, to })
+        })
+    }
 }
 
 #[cfg(test)]
@@ -309,6 +343,61 @@ mod tests {
         assert!(game.undo());
         assert!(game.pile(Pile::Foundation(0)).is_empty());
         assert_eq!(game.pile(Pile::Tableau(0)).len(), 13);
+    }
+
+    #[test]
+    fn auto_finishes_once_every_column_is_one_run() {
+        for kind in KINDS {
+            // The deck as eight King-to-Ace sequences of one suit each.
+            let mut deck = kind.rules().deck();
+            deck.sort_by_key(|card| (card.copy, card.suit, std::cmp::Reverse(card.rank)));
+            let sequences: Vec<&[Card]> = deck.chunks(13).collect();
+            let mut board = Board::new(kind.rules().piles());
+            // Four already complete...
+            for (i, sequence) in sequences[..4].iter().enumerate() {
+                *board.pile_mut(Pile::Foundation(i)) =
+                    sequence.iter().copied().map(Slot::up).collect();
+            }
+            // ...and four cut in two, the halves spread out, lower halves in reverse order.
+            for (i, (sequence, cut)) in sequences[4..].iter().zip([5, 8, 2, 11]).enumerate() {
+                let (upper, lower) = sequence.split_at(cut);
+                *board.pile_mut(Pile::Tableau(i)) = upper.iter().copied().map(Slot::up).collect();
+                *board.pile_mut(Pile::Tableau(9 - i)) =
+                    lower.iter().copied().map(Slot::up).collect();
+            }
+            let mut game = Game::with_board(kind, board);
+            assert!(game.is_certainly_winnable(), "{kind:?}");
+            for _ in 0..10 {
+                if !game.auto_finish_step() {
+                    break;
+                }
+            }
+            assert!(game.is_won(), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn auto_finish_joins_runs() {
+        // King to Eight of spades, Seven to Ace of spades: one move finishes them.
+        let mut game = spider(|board| {
+            *board.pile_mut(Pile::Tableau(0)) = spades(&[13, 12, 11, 10, 9, 8]);
+            *board.pile_mut(Pile::Tableau(4)) = spades(&[7, 6, 5, 4, 3, 2, 1]);
+        });
+        assert!(game.is_certainly_winnable());
+        assert!(game.auto_finish_step());
+        assert_eq!(game.pile(Pile::Foundation(0)).len(), 13);
+        assert!(game.pile(Pile::Tableau(0)).is_empty());
+        // Not while cards are face down or the stock has cards.
+        let game = spider(|board| {
+            let mut column = vec![Slot::down(card(Rank::Two, Suit::Hearts))];
+            column.extend(spades(&[13]));
+            *board.pile_mut(Pile::Tableau(0)) = column;
+        });
+        assert!(!game.is_certainly_winnable());
+        let game = spider(|board| {
+            *board.pile_mut(Pile::Stock) = vec![Slot::down(card(Rank::Two, Suit::Hearts))];
+        });
+        assert!(!game.is_certainly_winnable());
     }
 
     #[test]
