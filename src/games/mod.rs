@@ -129,8 +129,9 @@ impl GameKind {
             GameKind::Pyramid => &[
                 "Clear the pyramid by removing pairs of uncovered cards that add up to 13 \
                  (Ace = 1, Jack = 11, Queen = 12).",
-                "Drag one card onto its partner to remove both. The top card of the waste counts \
-                 as uncovered.",
+                "Tap a card to select it, then tap its partner to remove both (or drag one onto \
+                 the other). Tapping a card that doesn't match selects it instead.",
+                "The top card of the waste counts as uncovered.",
                 "Kings are removed on their own: tap them.",
                 "Tap the stock to turn up a new waste card; tap it when empty to turn the waste \
                  back over.",

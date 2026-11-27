@@ -78,11 +78,11 @@ the source code and ways to support the project.
 ### Pyramid
 
 - A pyramid of 28 face-up cards, each row covering the bottom of the row behind it, and a stock.
-- Remove pairs of uncovered cards that add up to 13 (Jack = 11, Queen = 12, Ace = 1) by dragging
-  one onto the other. The top card of the waste counts as uncovered.
-- Kings are removed on their own.
-- Tap a card to remove it: a King on its own, any other card with the first uncovered card that makes
-  13 with it.
+- Remove pairs of uncovered cards that add up to 13 (Jack = 11, Queen = 12, Ace = 1): tap one to
+  select it (it lifts up), then tap its partner. Tapping a card that doesn't match selects it
+  instead, and tapping the selected card again lets go of it. You can also drag one card onto the
+  other. The top card of the waste counts as uncovered.
+- Kings are removed on their own, with a tap.
 - Tap the stock to turn its next card onto the waste; once it's empty, tap it again to turn the
   waste back over.
 - Clear the pyramid to win.
