@@ -359,13 +359,15 @@ fn show_stats(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     shown: Res<StatsShown>,
-    screens: Query<Entity, With<StatsScreen>>,
+    screens: Query<&ChildOf, With<StatsScreen>>,
 ) {
     if !shown.is_changed() {
         return;
     }
+    // The marker is on the panel; remove the whole overlay it sits in, or the old overlays'
+    // shading would build up.
     for screen in &screens {
-        commands.entity(screen).despawn();
+        commands.entity(screen.parent()).despawn();
     }
     let kind = shown.0;
     let record = stats::load(kind);
