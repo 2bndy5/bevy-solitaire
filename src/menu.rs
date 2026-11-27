@@ -629,10 +629,16 @@ fn show_how_to_play(mut commands: Commands, asset_server: Res<AssetServer>, tabl
             format!("\u{F059} How to play {}", kind.name()),
             font(&asset_server, 28.0),
         ));
-        let points = kind.how_to_play().iter().copied().chain([
-            "Drag cards to move them, or tap a card to send it to the first place it fits. If \
+        // Games where taps select cards explain their taps themselves.
+        let taps_send = !table.0.rules().any_tap_selects();
+        let points = kind
+            .how_to_play()
+            .iter()
+            .copied()
+            .chain(taps_send.then_some(
+                "Drag cards to move them, or tap a card to send it to the first place it fits. If \
              it has nowhere to go, it shakes.",
-        ]);
+            ));
         for point in points {
             panel.spawn((
                 Node {

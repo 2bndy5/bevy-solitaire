@@ -202,6 +202,33 @@ impl TableColor {
     }
 }
 
+/// Which side of the table the stock (and waste) sits on. The foundations and other piles in the
+/// top row swap sides to match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StockSide {
+    #[default]
+    Left,
+    Right,
+}
+
+impl Choice for StockSide {
+    const ALL: &'static [Self] = &[StockSide::Left, StockSide::Right];
+
+    fn key(self) -> &'static str {
+        match self {
+            StockSide::Left => "left",
+            StockSide::Right => "right",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            StockSide::Left => "On the left",
+            StockSide::Right => "On the right",
+        }
+    }
+}
+
 /// How the table is lit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Lighting {
@@ -301,17 +328,19 @@ pub struct Settings {
     pub back: CardBack,
     pub table: TableColor,
     pub lighting: Lighting,
+    pub stock_side: StockSide,
 }
 
 impl Settings {
     /// Saves the settings as `key=value` lines.
     pub fn to_text(self) -> String {
         format!(
-            "deck={}\nback={}\ntable={}\nlighting={}\n",
+            "deck={}\nback={}\ntable={}\nlighting={}\nstock={}\n",
             self.deck.key(),
             self.back.key(),
             self.table.key(),
-            self.lighting.key()
+            self.lighting.key(),
+            self.stock_side.key()
         )
     }
 
@@ -335,6 +364,7 @@ impl Settings {
                 "back" => settings.back = CardBack::from_key(value).unwrap_or_default(),
                 "table" => settings.table = TableColor::from_key(value).unwrap_or_default(),
                 "lighting" => settings.lighting = Lighting::from_key(value).unwrap_or_default(),
+                "stock" => settings.stock_side = StockSide::from_key(value).unwrap_or_default(),
                 _ => {}
             }
         }
@@ -362,6 +392,7 @@ enum Pick {
     Back(CardBack),
     Table(TableColor),
     Lighting(Lighting),
+    StockSide(StockSide),
 }
 
 impl Pick {
@@ -371,6 +402,7 @@ impl Pick {
             Pick::Back(back) => settings.back == back,
             Pick::Table(table) => settings.table == table,
             Pick::Lighting(lighting) => settings.lighting == lighting,
+            Pick::StockSide(side) => settings.stock_side == side,
         }
     }
 
@@ -380,6 +412,7 @@ impl Pick {
             Pick::Back(back) => settings.back = back,
             Pick::Table(table) => settings.table = table,
             Pick::Lighting(lighting) => settings.lighting = lighting,
+            Pick::StockSide(side) => settings.stock_side = side,
         }
     }
 }
@@ -636,6 +669,14 @@ fn spawn_panel(mut commands: Commands, asset_server: Res<AssetServer>) {
                         .map(|&lighting| (Pick::Lighting(lighting), lighting.label(), Color::NONE))
                         .collect(),
                 );
+                row(
+                    panel,
+                    "Stock",
+                    StockSide::ALL
+                        .iter()
+                        .map(|&side| (Pick::StockSide(side), side.label(), Color::NONE))
+                        .collect(),
+                );
             });
         });
 }
@@ -681,6 +722,7 @@ mod tests {
             back: CardBack::Graphite,
             table: TableColor::Purple,
             lighting: Lighting::Evening,
+            stock_side: StockSide::Right,
         };
         assert_eq!(Settings::from_text(&settings.to_text()), settings);
     }
