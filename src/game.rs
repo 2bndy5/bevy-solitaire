@@ -164,6 +164,9 @@ pub struct Spot {
     /// Row, counting from 0 at the top.
     pub row: f32,
     pub fan: Fan,
+    /// How many layers up the pile rests, for piles that overlap others (TriPeaks' rows): a pile
+    /// on a higher level is drawn over one on a lower level.
+    pub level: u8,
 }
 
 impl Spot {
@@ -172,6 +175,7 @@ impl Spot {
             column,
             row,
             fan: Fan::Stacked,
+            level: 0,
         }
     }
 
@@ -180,7 +184,13 @@ impl Spot {
             column,
             row,
             fan: Fan::Down,
+            level: 0,
         }
+    }
+
+    /// This spot, raised to `level`.
+    pub const fn raised(self, level: u8) -> Self {
+        Self { level, ..self }
     }
 }
 

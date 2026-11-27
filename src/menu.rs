@@ -120,6 +120,8 @@ fn overlay(commands: &mut Commands, state: GameState, dim: f32) -> Entity {
                         // Fill narrow screens (wrapping the text) but don't sprawl on wide ones.
                         width: Val::Percent(100.0),
                         max_width: Val::Px(760.0),
+                        // Never wider than the screen, whatever is inside.
+                        min_width: Val::Px(0.0),
                         align_items: AlignItems::Center,
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(12.0),
@@ -170,44 +172,54 @@ pub fn main_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
         ));
         panel.spawn(line("Choose a game:", font(&asset_server, 20.0)));
         // A tile per game, two to a row.
-        panel
-            .spawn(Node {
-                width: Val::Percent(100.0),
-                max_width: Val::Px(560.0),
-                flex_wrap: FlexWrap::Wrap,
-                justify_content: JustifyContent::SpaceBetween,
-                row_gap: Val::Px(10.0),
-                ..default()
-            })
-            .with_children(|tiles| {
-                for kind in GameKind::ALL {
-                    tiles.spawn((
-                        Button,
-                        MenuAction::Play(kind),
-                        Node {
-                            width: Val::Percent(48.5),
-                            flex_direction: FlexDirection::Column,
-                            row_gap: Val::Px(2.0),
-                            padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
-                            border_radius: BorderRadius::all(Val::Px(8.0)),
+        for pair in GameKind::ALL.chunks(2) {
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    max_width: Val::Px(560.0),
+                    column_gap: Val::Px(10.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    for &kind in pair {
+                        row.spawn((
+                            Button,
+                            MenuAction::Play(kind),
+                            Node {
+                                flex_basis: Val::Px(0.0),
+                                flex_grow: 1.0,
+                                min_width: Val::Px(0.0),
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(2.0),
+                                padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
+                                border_radius: BorderRadius::all(Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(BUTTON_COLOR),
+                            children![
+                                (
+                                    Text::new(kind.name()),
+                                    TextColor(Color::WHITE),
+                                    font(&asset_server, 22.0),
+                                ),
+                                (
+                                    Text::new(saved_game_status(kind)),
+                                    TextColor(Color::srgb(0.8, 1.0, 0.8)),
+                                    font(&asset_server, 15.0),
+                                ),
+                            ],
+                        ));
+                    }
+                    // Keep a lone last tile half width.
+                    if pair.len() == 1 {
+                        row.spawn(Node {
+                            flex_basis: Val::Px(0.0),
+                            flex_grow: 1.0,
                             ..default()
-                        },
-                        BackgroundColor(BUTTON_COLOR),
-                        children![
-                            (
-                                Text::new(kind.name()),
-                                TextColor(Color::WHITE),
-                                font(&asset_server, 22.0),
-                            ),
-                            (
-                                Text::new(saved_game_status(kind)),
-                                TextColor(Color::srgb(0.8, 1.0, 0.8)),
-                                font(&asset_server, 15.0),
-                            ),
-                        ],
-                    ));
-                }
-            });
+                        });
+                    }
+                });
+        }
         panel.spawn((
             button_row(),
             children![

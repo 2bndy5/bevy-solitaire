@@ -30,6 +30,8 @@ pub const REST_HEIGHT: f32 = 0.5;
 /// Generous enough that stacked cards never compete for the same depth (z-fighting), even with
 /// the lower depth precision of some mobile GPUs.
 const CARD_GAP: f32 = 0.5;
+/// Height between overlapping levels of piles (see [`crate::game::Spot::level`]).
+const LEVEL_HEIGHT: f32 = 2.0;
 /// How far travelling cards rise, so they pass over resting cards.
 const TRAVEL_LIFT: f32 = 25.0;
 /// How long a card shakes when tapped with nowhere to go, in seconds.
@@ -576,13 +578,14 @@ fn sync_cards(
     }
     let game = &table.0;
     for pile in game.piles() {
+        let base = REST_HEIGHT + f32::from(game.rules().spot(pile).level) * LEVEL_HEIGHT;
         for (index, slot) in game.pile(pile).iter().enumerate() {
             let Some(Ok(mut view)) = entities.0.get(&slot.card).map(|&e| cards.get_mut(e)) else {
                 continue;
             };
             view.face_up = slot.face_up;
             if !pointer.is_dragging(&slot.card) {
-                let height = REST_HEIGHT + index as f32 * CARD_GAP;
+                let height = base + index as f32 * CARD_GAP;
                 view.target = to_world(layout.card_position(game, pile, index), height);
             }
         }

@@ -1,7 +1,7 @@
 # Bevy Solitaire
 
 A collection of solitaire games made with [Bevy], played with 3D cards on a gently tilted table.
-So far it has Klondike (draw one), FreeCell and Golf; more games are on the way.
+So far it has Klondike (draw one), FreeCell, Golf and TriPeaks; more games are on the way.
 
 It grew out of [bevy-52-card-pickup], reusing its free
 [asset pack of hand-drawn cards][card-assets-link], card model, menus and build setup.
@@ -59,6 +59,16 @@ the source code and ways to support the project.
   top card, regardless of suit. Kings and Aces don't wrap around.
 - Tap the stock to turn its next card onto the waste. The stock is only gone through once.
 - Clear all seven columns to win; cards left in the stock don't matter.
+
+### TriPeaks
+
+- Three peaks of overlapping cards, face down except the bottom row, with a stock and one card face
+  up on the waste.
+- Tap (or drag) an uncovered card onto the waste if it is one rank above or below the waste's top
+  card, regardless of suit. Kings and Aces connect.
+- Cards turn face up once nothing covers them.
+- Tap the stock to turn its next card onto the waste. The stock is only gone through once.
+- Clear all three peaks to win.
 
 Your settings and saved games are kept in the browser's local storage on the web, or in a
 `bevy-solitaire` folder in your config folder on desktop.
