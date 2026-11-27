@@ -568,6 +568,8 @@ fn spawn_panel(mut commands: Commands, asset_server: Res<AssetServer>) {
         .with_children(|root| {
             root.spawn((
                 Node {
+                    // Fill narrow screens (wrapping the options) but don't sprawl on wide ones.
+                    width: Val::Percent(100.0),
                     max_width: Val::Px(560.0),
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(14.0),
