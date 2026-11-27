@@ -285,6 +285,8 @@ pub struct Game {
     pub moves: u32,
     /// The boards and move counts before each move, most recent last, for [`Game::undo`].
     history: Vec<(Board, u32)>,
+    /// The board as it was dealt, for [`Game::restart`], if known.
+    dealt: Option<Board>,
 }
 
 impl Default for Game {
@@ -306,6 +308,7 @@ impl Game {
             board,
             moves: 0,
             history: Vec::new(),
+            dealt: None,
         }
     }
 
@@ -313,6 +316,7 @@ impl Game {
     pub fn deal(kind: GameKind, deck: Vec<Card>) -> Self {
         let mut game = Self::new(kind);
         kind.rules().deal(deck, &mut game.board);
+        game.dealt = Some(game.board.clone());
         game
     }
 
@@ -431,6 +435,27 @@ impl Game {
         true
     }
 
+    /// Puts the cards back as they were dealt ("undo all"), as one move that can itself be undone.
+    /// The move count starts again from zero.
+    ///
+    /// Returns `false` if the cards are already as dealt, or the deal isn't known.
+    pub fn restart(&mut self) -> bool {
+        let Some(start) = self
+            .dealt
+            .clone()
+            .or_else(|| self.history.first().map(|(board, _)| board.clone()))
+        else {
+            return false;
+        };
+        if start == self.board {
+            return false;
+        }
+        let before = std::mem::replace(&mut self.board, start);
+        self.history.push((before, self.moves));
+        self.moves = 0;
+        true
+    }
+
     /// The game as text, for saving. See [`Game::from_text`].
     ///
     /// One `key=value` line each for the game, the move count and every pile. A pile's cards are
@@ -438,16 +463,22 @@ impl Game {
     /// face up or `-` if face down.
     pub fn to_text(&self) -> String {
         let mut text = format!("game={}\nmoves={}\n", self.kind.key(), self.moves);
-        for pile in self.piles() {
-            let cards: Vec<String> = self
-                .pile(pile)
-                .iter()
-                .map(|slot| {
-                    let side = if slot.face_up { '+' } else { '-' };
-                    format!("{}{side}", slot.card.key())
-                })
-                .collect();
-            text.push_str(&format!("pile.{}={}\n", pile.key(), cards.join(" ")));
+        let mut write_board = |prefix: &str, board: &Board| {
+            for pile in board.piles() {
+                let cards: Vec<String> = board
+                    .pile(pile)
+                    .iter()
+                    .map(|slot| {
+                        let side = if slot.face_up { '+' } else { '-' };
+                        format!("{}{side}", slot.card.key())
+                    })
+                    .collect();
+                text.push_str(&format!("{prefix}.{}={}\n", pile.key(), cards.join(" ")));
+            }
+        };
+        write_board("pile", &self.board);
+        if let Some(dealt) = &self.dealt {
+            write_board("dealt", dealt);
         }
         text
     }
@@ -463,33 +494,50 @@ impl Game {
             .find(|(key, _)| *key == "game")
             .and_then(|(_, value)| GameKind::from_key(value))?;
         let mut game = Self::new(kind);
+        let mut dealt = Board::new(kind.rules().piles());
+        let mut has_dealt = false;
         for (key, value) in values() {
             if key == "moves" {
                 game.moves = value.parse().ok()?;
             } else if let Some(pile) = key.strip_prefix("pile.") {
-                let pile = Pile::from_key(pile).filter(|&pile| game.board.has(pile))?;
-                let cards = value
-                    .split_whitespace()
-                    .map(|word| {
-                        let (stem, side) = word.split_at_checked(word.len().checked_sub(1)?)?;
-                        let card = Card::from_key(stem)?;
-                        match side {
-                            "+" => Some(Slot::up(card)),
-                            "-" => Some(Slot::down(card)),
-                            _ => None,
-                        }
-                    })
-                    .collect::<Option<Vec<_>>>()?;
-                *game.board.pile_mut(pile) = cards;
+                read_pile(&mut game.board, pile, value)?;
+            } else if let Some(pile) = key.strip_prefix("dealt.") {
+                // An unreadable deal only loses "undo all", not the game.
+                has_dealt |= read_pile(&mut dealt, pile, value).is_some();
             }
         }
-        // Every card of the game's deck must be somewhere, exactly once.
-        let mut cards: Vec<Card> = game.board.cards().map(|slot| slot.card).collect();
-        let mut deck = game.rules().deck();
-        cards.sort();
-        deck.sort();
-        (cards == deck).then_some(game)
+        let deck = game.rules().deck();
+        game.dealt = (has_dealt && holds_deck(&dealt, &deck)).then_some(dealt);
+        holds_deck(&game.board, &deck).then_some(game)
     }
+}
+
+/// Reads a saved pile's cards (see [`Game::to_text`]) into `board`.
+fn read_pile(board: &mut Board, pile: &str, value: &str) -> Option<()> {
+    let pile = Pile::from_key(pile).filter(|&pile| board.has(pile))?;
+    let cards = value
+        .split_whitespace()
+        .map(|word| {
+            let (stem, side) = word.split_at_checked(word.len().checked_sub(1)?)?;
+            let card = Card::from_key(stem)?;
+            match side {
+                "+" => Some(Slot::up(card)),
+                "-" => Some(Slot::down(card)),
+                _ => None,
+            }
+        })
+        .collect::<Option<Vec<_>>>()?;
+    *board.pile_mut(pile) = cards;
+    Some(())
+}
+
+/// Is every card of `deck` somewhere on `board`, exactly once?
+fn holds_deck(board: &Board, deck: &[Card]) -> bool {
+    let mut cards: Vec<Card> = board.cards().map(|slot| slot.card).collect();
+    let mut deck = deck.to_vec();
+    cards.sort();
+    deck.sort();
+    cards == deck
 }
 
 /// Does `card` go directly on `top` when building up by suit (an Ace on nothing)?
@@ -601,6 +649,37 @@ mod tests {
         // A pile the game doesn't have.
         assert!(Game::from_text(&format!("{text}pile.c0=\n")).is_none());
         assert!(Game::from_text(&text.replacen("moves=0", "moves=lots", 1)).is_none());
+    }
+
+    #[test]
+    fn restart_goes_back_to_the_deal_and_can_be_undone() {
+        let mut game = Game::deal(GameKind::Klondike, new_deck());
+        let dealt = game.board.clone();
+        assert!(!game.restart(), "nothing to undo yet");
+        for _ in 0..5 {
+            game.draw();
+        }
+        let played = game.board.clone();
+        assert!(game.restart());
+        assert_eq!(game.board, dealt);
+        assert_eq!(game.moves, 0);
+        assert!(game.undo());
+        assert_eq!(game.board, played);
+        assert_eq!(game.moves, 5);
+
+        // A saved game remembers its deal.
+        let mut restored = Game::from_text(&game.to_text()).unwrap();
+        assert!(!restored.can_undo());
+        assert!(restored.restart());
+        assert_eq!(restored.board, dealt);
+        // An old save, without the deal, can't restart without history.
+        let old: String = game
+            .to_text()
+            .lines()
+            .filter(|line| !line.starts_with("dealt."))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        assert!(!Game::from_text(&old).unwrap().restart());
     }
 
     #[test]

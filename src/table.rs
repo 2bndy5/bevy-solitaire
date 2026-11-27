@@ -9,7 +9,7 @@ use crate::{
     celebrate::Flying,
     game::{Game, Pile},
     games::GameKind,
-    hud::{GameClock, UndoRequested},
+    hud::{GameClock, Undo, UndoRequested},
     layout::{HUD_HEIGHT_PX, Layout},
     menu::Popup,
     progress,
@@ -491,7 +491,8 @@ fn pointer_input(
     }
 }
 
-/// Takes back the last move when the Undo button is pressed (or Ctrl+Z, Cmd+Z or U).
+/// Takes back the last move when the Undo button is pressed (or Ctrl+Z, Cmd+Z or U), or every
+/// move when Undo All is.
 fn undo_input(
     mut requested: ResMut<UndoRequested>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -507,12 +508,22 @@ fn undo_input(
     ]);
     let shortcut =
         keys.just_pressed(KeyCode::KeyU) || (modifier && keys.just_pressed(KeyCode::KeyZ));
-    let button = std::mem::take(&mut requested.0);
-    if button || shortcut {
-        // Not while cards are in hand, or while the game is finishing itself.
-        if pointer.drag.is_none() && auto_finish.next_move_at.is_none() && table.0.can_undo() {
+    let request = requested.0.take().or(shortcut.then_some(Undo::Last));
+    // Not while cards are in hand, or while the game is finishing itself.
+    let Some(request) = request.filter(|_| pointer.drag.is_none()) else {
+        return;
+    };
+    if auto_finish.next_move_at.is_some() {
+        return;
+    }
+    match request {
+        Undo::Last if table.0.can_undo() => {
             table.0.undo();
         }
+        Undo::All => {
+            table.0.restart();
+        }
+        Undo::Last => {}
     }
 }
 
@@ -524,7 +535,7 @@ fn reset_auto_finish(
 ) {
     *auto_finish = AutoFinish::default();
     *speed = AnimationSpeed::default();
-    undo.0 = false;
+    undo.0 = None;
 }
 
 /// Once the game is certainly winnable, plays it out to the end, each move coming sooner than the

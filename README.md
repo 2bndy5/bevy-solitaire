@@ -18,8 +18,10 @@ game again carries on where you left off (the menu shows its moves and time). Pr
 button in the top bar to return to the main menu at any time.
 
 Press the question mark button in the top bar for how to play the current game; it also pops up
-the first time you play each game. In games that can get stuck (like Golf), a banner at the bottom
-tells you when no moves are left. Spider's tile on the main menu opens a choice of one, two or four
+the first time you play each game. In games that can get stuck (like Golf), a pop-up tells you when no
+moves are left, with buttons to undo, deal again or go home. "Undo" (or Ctrl+Z, Cmd+Z or U) takes
+back one move; "Undo all" (the double arrow) puts the cards back as they were dealt, and can itself
+be undone. Spider's tile on the main menu opens a choice of one, two or four
 suits.
 
 Winning a game shows your five best times for that game; the main menu's "Best Times" button shows
@@ -137,7 +139,7 @@ Run the tests for the game rules with `cargo test`.
 | `src/layout.rs` | Where piles and cards sit on the table, and pointer hit-testing.        |
 | `src/scene.rs`  | The 3D scene: tilted camera, lighting and the felt table.               |
 | `src/table.rs`  | Bevy systems: dealing, card animation, dragging and the HUD.            |
-| `src/hud.rs`    | Move count, game clock, and the Home, Settings, Undo and New Game buttons. |
+| `src/hud.rs`    | Move count, game clock, and the top bar's buttons.                      |
 | `src/celebrate.rs` | The win celebration.                                                 |
 | `src/menu.rs`   | The main menu, and the win, best times and about screens.              |
 | `src/progress.rs` | Saving and resuming the last game of each kind.                       |
