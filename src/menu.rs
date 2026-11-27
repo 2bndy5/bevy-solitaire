@@ -366,18 +366,19 @@ fn show_stats(
                 })
                 .with_children(|tabs| {
                     for tab in GameKind::ALL {
+                        let color = if tab == kind {
+                            BUTTON_COLOR
+                        } else {
+                            UNSELECTED_COLOR
+                        };
+                        // The button already has a background color: replace it, rather than
+                        // spawn it with two (which panics).
                         tabs.spawn(text_button(
                             tab.name(),
                             font(&asset_server, 16.0),
-                            (
-                                MenuAction::ShowStats(tab),
-                                BackgroundColor(if tab == kind {
-                                    BUTTON_COLOR
-                                } else {
-                                    UNSELECTED_COLOR
-                                }),
-                            ),
-                        ));
+                            MenuAction::ShowStats(tab),
+                        ))
+                        .insert(BackgroundColor(color));
                     }
                 });
         }
