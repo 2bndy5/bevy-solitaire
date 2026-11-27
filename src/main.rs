@@ -13,7 +13,7 @@ mod table;
 
 use celebrate::CelebratePlugin;
 use hud::HudPlugin;
-use menu::{hello_menu, on_start_button};
+use menu::{fit_ui_to_window, hello_menu, on_start_button};
 use scene::ScenePlugin;
 use settings::SettingsPlugin;
 use state::GameState;
@@ -39,5 +39,6 @@ fn main() {
         ))
         .add_systems(OnEnter(GameState::Menu), hello_menu)
         .add_observer(on_start_button)
+        .add_systems(Update, fit_ui_to_window)
         .run();
 }
