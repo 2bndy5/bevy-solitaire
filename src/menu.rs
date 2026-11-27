@@ -8,6 +8,7 @@ use crate::{
     progress,
     state::GameState,
     stats::{self, LastWin, Stats},
+    storage,
     table::{NextDeal, Table},
 };
 
@@ -50,6 +51,23 @@ pub enum MenuAction {
     ShowStats(GameKind),
     /// Show the about screen.
     About,
+    /// Show the ways to play this family of games (e.g. Spider's suit counts).
+    Variants(GameKind),
+    /// Show how to play the current game.
+    HowToPlay,
+    /// Close the pop-up.
+    ClosePopup,
+}
+
+/// The pop-up showing over everything else, if any.
+#[derive(States, Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Popup {
+    #[default]
+    Closed,
+    /// How to play the current game.
+    HowToPlay,
+    /// The ways to play a family of games.
+    Variants(GameKind),
 }
 
 /// The look of a button: a rounded, green box.
@@ -85,6 +103,9 @@ fn text_button(label: &'static str, font: TextFont, marker: impl Bundle) -> impl
 /// A centered row of buttons that wraps on narrow screens.
 fn button_row() -> Node {
     Node {
+        // A definite width, so the row wraps (and grows taller) when its buttons don't fit,
+        // instead of spilling over what comes after it.
+        width: Val::Percent(100.0),
         column_gap: Val::Px(12.0),
         row_gap: Val::Px(12.0),
         flex_wrap: FlexWrap::Wrap,
@@ -161,6 +182,65 @@ fn saved_game_status(kind: GameKind) -> String {
     }
 }
 
+/// Spawns `tiles` into `parent`, two to a row: each a button with a name and a status line, that
+/// does its action when pressed.
+fn spawn_tiles(
+    parent: &mut ChildSpawnerCommands,
+    asset_server: &AssetServer,
+    tiles: Vec<(&'static str, String, MenuAction)>,
+) {
+    for pair in tiles.chunks(2) {
+        parent
+            .spawn(Node {
+                width: Val::Percent(100.0),
+                max_width: Val::Px(560.0),
+                column_gap: Val::Px(10.0),
+                ..default()
+            })
+            .with_children(|row| {
+                for (name, status, action) in pair {
+                    row.spawn((
+                        Button,
+                        *action,
+                        Node {
+                            flex_basis: Val::Px(0.0),
+                            flex_grow: 1.0,
+                            min_width: Val::Px(0.0),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(2.0),
+                            padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
+                            border_radius: BorderRadius::all(Val::Px(8.0)),
+                            ..default()
+                        },
+                        BackgroundColor(BUTTON_COLOR),
+                        children![
+                            (
+                                Text::new(*name),
+                                TextColor(Color::WHITE),
+                                font(asset_server, 22.0),
+                            ),
+                            (
+                                Text::new(status.clone()),
+                                TextColor(Color::srgb(0.8, 1.0, 0.8)),
+                                font(asset_server, 15.0),
+                            ),
+                        ],
+                    ));
+                }
+                // Keep a lone last tile half width.
+                if pair.len() == 1 {
+                    row.spawn(Node {
+                        flex_basis: Val::Px(0.0),
+                        flex_grow: 1.0,
+                        // As wide as a tile, padding included.
+                        padding: UiRect::horizontal(Val::Px(14.0)),
+                        ..default()
+                    });
+                }
+            });
+    }
+}
+
 /// Shows the main menu: a button for each game, then the stats and about buttons.
 pub fn main_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
     let panel = overlay(&mut commands, GameState::Menu, 0.75);
@@ -171,72 +251,56 @@ pub fn main_menu(mut commands: Commands, asset_server: Res<AssetServer>) {
             font(&asset_server, 36.0),
         ));
         panel.spawn(line("Choose a game:", font(&asset_server, 20.0)));
-        // A tile per game, two to a row.
-        for pair in GameKind::ALL.chunks(2) {
-            panel
-                .spawn(Node {
-                    width: Val::Percent(100.0),
-                    max_width: Val::Px(560.0),
-                    column_gap: Val::Px(10.0),
+        let tiles = GameKind::MENU
+            .iter()
+            .map(|&kind| match kind.variants() {
+                [] => (kind.name(), saved_game_status(kind), MenuAction::Play(kind)),
+                variants => (
+                    kind.family_name(),
+                    // embedded the FontAwesome bars icon via unicode code-point
+                    format!("\u{F0C9} {} ways to play", variants.len()),
+                    MenuAction::Variants(kind),
+                ),
+            })
+            .collect();
+        spawn_tiles(panel, &asset_server, tiles);
+        // Two equal buttons side by side. (Not a wrapping row: some phones measured its
+        // wrapped height too short, so the About button overlapped the text below it.)
+        let half = |label: &'static str, action: MenuAction| {
+            (
+                Button,
+                action,
+                Node {
+                    flex_basis: Val::Px(0.0),
+                    flex_grow: 1.0,
+                    min_width: Val::Px(0.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::axes(Val::Px(8.0), Val::Px(8.0)),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
                     ..default()
-                })
-                .with_children(|row| {
-                    for &kind in pair {
-                        row.spawn((
-                            Button,
-                            MenuAction::Play(kind),
-                            Node {
-                                flex_basis: Val::Px(0.0),
-                                flex_grow: 1.0,
-                                min_width: Val::Px(0.0),
-                                flex_direction: FlexDirection::Column,
-                                row_gap: Val::Px(2.0),
-                                padding: UiRect::axes(Val::Px(14.0), Val::Px(8.0)),
-                                border_radius: BorderRadius::all(Val::Px(8.0)),
-                                ..default()
-                            },
-                            BackgroundColor(BUTTON_COLOR),
-                            children![
-                                (
-                                    Text::new(kind.name()),
-                                    TextColor(Color::WHITE),
-                                    font(&asset_server, 22.0),
-                                ),
-                                (
-                                    Text::new(saved_game_status(kind)),
-                                    TextColor(Color::srgb(0.8, 1.0, 0.8)),
-                                    font(&asset_server, 15.0),
-                                ),
-                            ],
-                        ));
-                    }
-                    // Keep a lone last tile half width.
-                    if pair.len() == 1 {
-                        row.spawn(Node {
-                            flex_basis: Val::Px(0.0),
-                            flex_grow: 1.0,
-                            // As wide as a tile, padding included.
-                            padding: UiRect::horizontal(Val::Px(14.0)),
-                            ..default()
-                        });
-                    }
-                });
-        }
+                },
+                BackgroundColor(BUTTON_COLOR),
+                children![(
+                    Text::new(label),
+                    TextColor(Color::WHITE),
+                    TextLayout::no_wrap(),
+                    font(&asset_server, 20.0)
+                )],
+            )
+        };
         panel.spawn((
-            button_row(),
+            Node {
+                width: Val::Percent(100.0),
+                max_width: Val::Px(560.0),
+                column_gap: Val::Px(10.0),
+                ..default()
+            },
             children![
                 // embedded the FontAwesome trophy icon via unicode code-point
-                text_button(
-                    "\u{F091} Best Times",
-                    font(&asset_server, 20.0),
-                    MenuAction::Stats
-                ),
+                half("\u{F091} Best Times", MenuAction::Stats),
                 // embedded the FontAwesome info icon via unicode code-point
-                text_button(
-                    "\u{F05A} About",
-                    font(&asset_server, 20.0),
-                    MenuAction::About
-                ),
+                half("\u{F05A} About", MenuAction::About),
             ],
         ));
         panel.spawn(line(
@@ -467,6 +531,14 @@ pub struct MenuPlugin;
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<StatsShown>()
+            .init_state::<Popup>()
+            .add_systems(OnEnter(Popup::HowToPlay), show_how_to_play)
+            .add_systems(Update, show_variants)
+            .add_systems(
+                Update,
+                close_popup_on_escape.run_if(not(in_state(Popup::Closed))),
+            )
+            .add_systems(OnEnter(GameState::Play), first_time_help)
             .add_observer(on_menu_buttons)
             .add_observer(links::on_link_press)
             .add_systems(OnEnter(GameState::Menu), main_menu)
@@ -480,6 +552,145 @@ impl Plugin for MenuPlugin {
                 }),
             )
             .add_systems(Update, fit_ui_to_window);
+    }
+}
+
+/// A pop-up's panel: over everything else, gone when `popup` closes.
+fn popup_panel(commands: &mut Commands, popup: Popup) -> Entity {
+    let mut panel = Entity::PLACEHOLDER;
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::all(Val::Px(16.0)),
+                ..default()
+            },
+            BackgroundColor(Color::BLACK.with_alpha(0.6)),
+            GlobalZIndex(3),
+            DespawnOnExit(popup),
+        ))
+        .with_children(|root| {
+            panel = root
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        max_width: Val::Px(600.0),
+                        min_width: Val::Px(0.0),
+                        align_items: AlignItems::Center,
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(12.0),
+                        padding: UiRect::all(Val::Px(24.0)),
+                        border_radius: BorderRadius::all(Val::Px(16.0)),
+                        ..default()
+                    },
+                    // Opaque: pop-ups sit over busy screens.
+                    BackgroundColor(Color::srgb(0.06, 0.08, 0.07)),
+                ))
+                .id();
+        });
+    panel
+}
+
+/// Shows how to play the current game.
+fn show_how_to_play(mut commands: Commands, asset_server: Res<AssetServer>, table: Res<Table>) {
+    let kind = table.0.kind;
+    let panel = popup_panel(&mut commands, Popup::HowToPlay);
+    commands.entity(panel).with_children(|panel| {
+        // embedded the FontAwesome question icon via unicode code-point
+        panel.spawn(line(
+            format!("\u{F059} How to play {}", kind.name()),
+            font(&asset_server, 28.0),
+        ));
+        let points = kind.how_to_play().iter().copied().chain([
+            "Drag cards to move them, or tap a card to send it to the first place it fits. If \
+             it has nowhere to go, it shakes.",
+        ]);
+        for point in points {
+            panel.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                },
+                children![
+                    (
+                        Text::new("\u{2022}"),
+                        TextColor(Color::WHITE),
+                        font(&asset_server, 18.0),
+                    ),
+                    (
+                        Node {
+                            flex_grow: 1.0,
+                            flex_basis: Val::Px(0.0),
+                            min_width: Val::Px(0.0),
+                            ..default()
+                        },
+                        children![(
+                            Text::new(point),
+                            TextColor(Color::WHITE),
+                            font(&asset_server, 18.0),
+                        )],
+                    ),
+                ],
+            ));
+        }
+        // embedded the FontAwesome check icon via unicode code-point
+        panel.spawn(text_button(
+            "\u{F00C} Got it",
+            font(&asset_server, 20.0),
+            MenuAction::ClosePopup,
+        ));
+    });
+}
+
+/// Shows the ways to play a family of games, when that pop-up opens.
+fn show_variants(mut commands: Commands, asset_server: Res<AssetServer>, popup: Res<State<Popup>>) {
+    let Popup::Variants(family) = *popup.get() else {
+        return;
+    };
+    if !popup.is_changed() {
+        return;
+    }
+    let panel = popup_panel(&mut commands, Popup::Variants(family));
+    commands.entity(panel).with_children(|panel| {
+        panel.spawn(line(family.family_name(), font(&asset_server, 30.0)));
+        panel.spawn(line("Choose how to play:", font(&asset_server, 20.0)));
+        let tiles = family
+            .variants()
+            .iter()
+            .map(|&kind| {
+                (
+                    kind.variant_name(),
+                    saved_game_status(kind),
+                    MenuAction::Play(kind),
+                )
+            })
+            .collect();
+        spawn_tiles(panel, &asset_server, tiles);
+        // embedded the FontAwesome arrow-left icon via unicode code-point
+        panel.spawn(text_button(
+            "\u{F060} Back",
+            font(&asset_server, 20.0),
+            MenuAction::ClosePopup,
+        ));
+    });
+}
+
+fn close_popup_on_escape(keys: Res<ButtonInput<KeyCode>>, mut popup: ResMut<NextState<Popup>>) {
+    if keys.just_pressed(KeyCode::Escape) {
+        popup.set(Popup::Closed);
+    }
+}
+
+/// Shows how to play a game the first time it is played.
+fn first_time_help(table: Res<Table>, mut popup: ResMut<NextState<Popup>>) {
+    let name = format!("seen-{}", table.0.kind.key());
+    if storage::load(&name).is_none() {
+        storage::save(&name, "yes");
+        popup.set(Popup::HowToPlay);
     }
 }
 
@@ -518,6 +729,7 @@ fn ui_scale_for(window: Vec2) -> f32 {
 ///
 /// Buttons act on the pointer's press event, which arrives once per press. (The button widget's
 /// own `Activate` event can be missed when a press and release land in the same frame.)
+#[allow(clippy::too_many_arguments)]
 pub fn on_menu_buttons(
     press: On<PointerPress>,
     actions: Query<&MenuAction>,
@@ -526,6 +738,7 @@ pub fn on_menu_buttons(
     mut next_deal: ResMut<NextDeal>,
     mut shown: ResMut<StatsShown>,
     mut game_state: ResMut<NextState<GameState>>,
+    mut popup: ResMut<NextState<Popup>>,
 ) {
     let state = *state.get();
     let Ok(&action) = actions.get(press.entity) else {
@@ -544,6 +757,7 @@ pub fn on_menu_buttons(
         }
         MenuAction::Play(kind) => {
             *next_deal = NextDeal { kind, resume: true };
+            popup.set(Popup::Closed);
             game_state.set(GameState::Deal);
         }
         MenuAction::Home if state != GameState::Menu => game_state.set(GameState::Menu),
@@ -555,6 +769,9 @@ pub fn on_menu_buttons(
             }
         }
         MenuAction::About => game_state.set(GameState::About),
+        MenuAction::Variants(kind) => popup.set(Popup::Variants(kind)),
+        MenuAction::HowToPlay => popup.set(Popup::HowToPlay),
+        MenuAction::ClosePopup => popup.set(Popup::Closed),
     }
 }
 
