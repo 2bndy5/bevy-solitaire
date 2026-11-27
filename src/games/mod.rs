@@ -142,6 +142,8 @@ impl GameKind {
                  in an empty column.",
                 "Only runs of one suit move together.",
                 "Tap the stock to deal a card onto every column (not while a column is empty).",
+                "Once the stock is empty and every column is one run of one suit, the game \
+                 finishes itself.",
             ],
         }
     }
